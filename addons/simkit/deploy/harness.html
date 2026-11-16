@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>SimKit iframe harness</title>
+<!-- A same-origin stand-in for the sims site's play page: an iframe, a Full screen button, and a copy of the
+     page's listener for the game's "sims:leave-game" message. It is NOT the real site. -->
+<style>body{margin:0;font-family:Arial,sans-serif;background:#222;color:#eee} #bar{padding:8px} iframe{border:0;display:block}</style></head>
+<body>
+<div id="bar"><button id="fs">Full screen</button> <span id="leaves">leave messages: 0</span></div>
+<iframe id="game" src="game/index.html" width="1180" height="500" title="Simulation"></iframe>
+<script>
+window.leaveCount = 0;
+const frame = document.getElementById('game');
+window.addEventListener('message', function (e) {
+	if (e.origin === location.origin && e.source === frame.contentWindow && e.data && e.data.type === 'sims:leave-game') {
+		window.leaveCount += 1;
+		document.getElementById('leaves').textContent = 'leave messages: ' + window.leaveCount;
+		document.getElementById('fs').focus();
+	}
+});
+const params = new URLSearchParams(location.search);
+if (params.get('q')) { frame.src = 'game/index.html?' + params.get('q'); }
+if (params.get('w')) { frame.width = params.get('w'); }
+if (params.get('h')) { frame.height = params.get('h'); }
+</script>
+</body></html>
