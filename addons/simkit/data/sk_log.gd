@@ -11,6 +11,11 @@ extends RefCounted
 ##   log.attach(session)                      # records start / pause / reset / finish + param changes
 ##   log.record("note", {"what": "opened help"})
 ##   log.add_row("populations", [t, rabbits, foxes])      # after log.table("populations", ["t", "rabbits", "foxes"])
+##
+## Tables keep every run. Calling table() again with the same columns (e.g. from on_reset) keeps the rows;
+## add session.run_number as a column to tell runs apart. When attached, rows written for a starting
+## picture that was replaced before it ever ran (a settings change or new seed while READY) are dropped,
+## so the export holds each real run once. clear_table() empties a table on purpose.
 
 # === CONSTANTS ===
 const MAX_EVENTS: int = 5000
@@ -22,7 +27,7 @@ var app_name: String = "simulation"
 var events: Array[Dictionary] = []
 ## Array of {"prompt_id": String, "prompt": String, "choice": String, "ms": int}
 var responses: Array[Dictionary] = []
-## name -> {"columns": PackedStringArray, "rows": Array}
+## name -> {"columns": PackedStringArray, "rows": Array, "runs": PackedInt32Array (session.run_number per row)}
 var tables: Dictionary = {}
 ## slot -> {"meta": Dictionary, "series": Dictionary}
 var kept_runs: Dictionary = {}
@@ -43,6 +48,8 @@ func attach(p_session: SkSession, p_params: SkParams = null) -> void:
 		record("state", {"state": SkSession.State.keys()[s]}))
 	session.reset_done.connect(func() -> void: record("reset", {"seed": session.seed_value}))
 	session.finished.connect(func(reason: String) -> void: record("finished", {"reason": reason}))
+	if not session.resetting.is_connected(_on_resetting):
+		session.resetting.connect(_on_resetting)
 	if params != null:
 		params.changed.connect(func(id: String, v: Variant) -> void:
 			record("param", {"id": id, "value": _plain(params.spec(id), v)}))
@@ -69,8 +76,26 @@ func record_response(prompt_id: String, prompt: String, choice: String) -> void:
 	record("response", {"prompt_id": prompt_id, "choice": choice})
 
 
-func table(name: String, columns: PackedStringArray) -> void:
-	tables[name] = {"columns": columns, "rows": []}
+## Creates a table. Called again with the same columns it keeps the existing rows (returns true); with
+## different columns it warns and changes nothing (returns false). Use clear_table() to empty one.
+func table(name: String, columns: PackedStringArray) -> bool:
+	if tables.has(name):
+		if (tables[name]["columns"] as PackedStringArray) == columns:
+			return true
+		push_warning("SkLog.table('%s'): already exists with columns %s; refusing to replace it with %s. Use clear_table() or a new name." % [
+				name, str(tables[name]["columns"]), str(columns)])
+		return false
+	tables[name] = {"columns": columns, "rows": [], "runs": PackedInt32Array()}
+	return true
+
+
+## Removes every row of a table, keeping its columns. Returns false if the table is unknown.
+func clear_table(name: String) -> bool:
+	if not tables.has(name):
+		return false
+	(tables[name]["rows"] as Array).clear()
+	tables[name]["runs"] = PackedInt32Array()
+	return true
 
 
 ## Appends one row (same length as the table's columns). Returns false if the table is unknown, the row
@@ -82,6 +107,9 @@ func add_row(name: String, row: Array) -> bool:
 	if row.size() != (t["columns"] as PackedStringArray).size() or (t["rows"] as Array).size() >= MAX_ROWS:
 		return false
 	(t["rows"] as Array).append(row.duplicate())
+	var runs: PackedInt32Array = t.get("runs", PackedInt32Array())
+	runs.append(session.run_number if session != null else 0)
+	t["runs"] = runs
 	return true
 
 
@@ -116,5 +144,26 @@ func count(kind: String) -> int:
 
 
 # === PRIVATE METHODS ===
+## The run being replaced never started: its rows only described a starting picture that is now gone.
+func _on_resetting(run_started: bool) -> void:
+	if run_started or session == null or session.run_number <= 0:
+		return
+	var current: int = session.run_number
+	for name: String in tables:
+		var t: Dictionary = tables[name]
+		var runs: PackedInt32Array = t.get("runs", PackedInt32Array())
+		var rows: Array = t["rows"]
+		if runs.size() != rows.size():
+			continue   # rows were added around add_row(); leave the table alone
+		var kept_rows: Array = []
+		var kept_runs: PackedInt32Array = PackedInt32Array()
+		for i: int in range(rows.size()):
+			if runs[i] != current:
+				kept_rows.append(rows[i])
+				kept_runs.append(runs[i])
+		t["rows"] = kept_rows
+		t["runs"] = kept_runs
+
+
 static func _plain(spec: SkParam, v: Variant) -> Variant:
 	return spec.choices[int(v)] if spec != null and spec.kind == SkParam.Kind.CHOICE else v

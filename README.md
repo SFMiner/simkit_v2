@@ -5,8 +5,8 @@ It removes the parts every simulation re-implements: parameters and limits, star
 clock, a theme, accessibility settings, keyboard handling for web iframes, graphs, optional lessons and data
 export, and the web export. It does **not** include any scientific model, and it never asks you to inherit from anything.
 
-Status: version 0.1.0, first working version. 266 automated checks pass on Godot 4.7 and 4.5; the web export was
-checked in real Chromium. See "Verified / not verified" below.
+Status: version 0.2.0. 280 automated checks pass on Godot 4.7.2 and 4.5. The demos' web export was checked in
+real Chromium for 0.1.0; for 0.2.0, two simulations built on the kit passed a 45-check run in Chrome. See "Verified / not verified" below, and "Changes" at the end.
 
 ## Quick start
 
@@ -62,7 +62,7 @@ random, turn-driven, no lesson or gauge) and *Cooling coffee* (38 lines of code)
 ## Tests
 
 ```bash
-GODOT=godot bash tests/run_all.sh                       # 7 suites, 266 checks
+GODOT=godot bash tests/run_all.sh                       # 7 suites, 280 checks
 bash addons/simkit/deploy/export_web.sh . exports/web   # export + contract checks (needs 4.7 export templates)
 ```
 
@@ -80,3 +80,16 @@ colour-blind viewing, the real sims site, a lean web template, a 4.5 web export,
 `repository-analysis.md` · `framework-architecture.md` · `integration-guide.md` · `migration-assessment.md`
 
 Licence: not set (yours to choose). Third-party code: none. Engine: Godot (MIT).
+
+## Changes
+
+**0.2.0** (2026-11-17): fixes for the four blocking findings of the independent audit.
+- **Space on a focused transport button acts once.** The Space hotkey now stands aside when a button has keyboard
+  focus; before, Start on a focused button started and immediately paused the run.
+- **Generations that step and run**: the guide now recommends `FIXED_STEP` with `clock.step = 1.0`. The transport
+  bar hides Start for a `MANUAL` session, which could never run on its own.
+- **Reproducible starting pictures**: `SkSession.reset_when_ready_changes()` replaces the guide's old advice to
+  call `on_reset()` on a READY settings change, which skipped the reseed.
+- **Logs keep every run**: `SkLog.table()` called again with the same columns keeps the rows (different columns are
+  refused), `clear_table()` empties one, `SkSession.run_number` numbers the runs, and rows of a starting picture
+  that never ran are dropped. Both demos now write a `run` column.

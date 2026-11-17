@@ -97,7 +97,7 @@ func _test_predator_prey() -> void:
 	check(parsed["context"]["seed"] != null and parsed["format"] == "simkit-session", "pp: export is self-describing")
 	d.csv_button.pressed.emit()
 	var csv: String = FileAccess.get_file_as_string("user://exports/predator-prey-populations.csv")
-	check(csv.begins_with("month,rabbits,foxes\r\n") and csv.count("\r\n") > 40, "pp: CSV export of the table")
+	check(csv.begins_with("run,month,rabbits,foxes\r\n") and csv.count("\r\n") > 40, "pp: CSV export of the table")
 	# Reset reproduces the run
 	d.transport.reset_button.pressed.emit()
 	check(s.state == SkSession.State.READY and not d.params.locked and d.graph.point_count("rabbits") == 1 and s.sim_time == 0.0, "pp: Reset returns to READY, unlocks, clears the live series")
@@ -178,7 +178,7 @@ func _test_selection() -> void:
 	check(s.state == SkSession.State.FINISHED and s.finish_reason == "the moths died out", "ns: a doomed population ends the run with its reason (%s)" % s.finish_reason)
 	d.json_button.pressed.emit()
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("user://exports/natural-selection-session.json"))
-	check(parsed is Dictionary and parsed["context"]["mode"] == "MANUAL" and parsed["tables"]["generations"]["columns"] == ["generation", "dark_moths", "moths"], "ns: export works with only core + data modules in use")
+	check(parsed is Dictionary and parsed["context"]["mode"] == "MANUAL" and parsed["tables"]["generations"]["columns"] == ["run", "generation", "dark_moths", "moths"], "ns: export works with only core + data modules in use")
 	check(_min_touch(d.focus_controls()) >= 52.0, "ns: touch targets >= 52 base px")
 	# the demo does not use the lesson panel or gauge at all
 	check(d.get_node_or_null("SkLessonPanel") == null and not ("lesson_panel" in d) and not ("gauge" in d), "ns: this demo uses no lesson panel and no gauge (optional modules omitted)")

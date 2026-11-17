@@ -76,8 +76,9 @@ model plus a UI script that wires it to SimKit pieces.
 1. **Composition, not inheritance.** `SkSession` calls two `Callable`s you give it. No base class, no required
    method names. A model can be a `RefCounted`, a `Node`, or a lambda.
 2. **Three time models behind one lifecycle.** `FIXED_STEP` (continuous models, equal steps),
-   `CONTINUOUS` (per-frame dt, capped) and `MANUAL` (turns, generations, events: time moves only on
-   `step_once()`). The two demos use FIXED_STEP and MANUAL with the same transport bar and log.
+   `CONTINUOUS` (per-frame dt, capped) and `MANUAL` (time moves only on `step_once()`; it never runs by
+   itself). Generations that should also run use FIXED_STEP with `clock.step = 1.0` (0.2.0). The two demos
+   use FIXED_STEP and MANUAL with the same transport bar and log.
 3. **No auto-play.** A session never leaves READY by itself. Pause freezes the model. Tested.
 4. **Reproducibility is a first-class field.** `SkSession.rng` is seeded; `reset()` replays the same random
    history; `describe()` returns framework version, mode, seed, sim time, steps and readable parameter values and

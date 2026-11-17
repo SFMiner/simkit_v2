@@ -72,7 +72,8 @@ func _ready() -> void:
 |---|---|---|
 | Differential equations, feedback, physics-like | `FIXED_STEP` (default) | `session.clock.step`, `session.speed`, `duration`; use `session.rng` for any randomness |
 | Per-frame motion where exact step size does not matter | `CONTINUOUS` | dt is the real frame time, capped by `max_delta` |
-| Generations, turns, discrete events | `MANUAL` | `session.step_once()`; `SkTransportBar.show_play = false`, `step_text = "Next generation"` |
+| Generations or turns that can also run on their own | `FIXED_STEP`, `clock.step = 1.0` | One step = one generation. `step_text = "Next generation"` for single steps; Start runs `speed` generations per second (`speeds = [1.0, 2.0, 4.0, 8.0]`). Check `MAX_GENERATIONS` with `duration`. |
+| Steps only when the student acts (never runs by itself) | `MANUAL` | `session.step_once()` with `manual_dt`. The transport bar hides Start for a MANUAL session, since it could never run. |
 | Your own loop | any, with `auto_process = false` | call `session.advance(delta)` yourself |
 
 ## 5. Parameters
@@ -86,8 +87,11 @@ session.lock_params_after_start = true       # locked_while_running params refus
 
 * Read with `get_float/int/bool/get_value`; react with `params.changed(id, value)`.
 * **Defaults must lie on the step grid** (`min + k*step`); `params.validate()` reports mistakes. Run it in a test.
-* If a parameter determines the *starting picture*, re-initialise when it changes while READY
-  (`if session.state == SkSession.State.READY: on_reset()`). Both demos needed this fix; it is easy to forget.
+* If a parameter determines the *starting picture*, call `session.reset_when_ready_changes()` once (after
+  `session.params = params`). A change while READY then calls `session.reset()`, which reseeds the rng before
+  `on_reset`, so the picture shown is exactly the one Reset replays. **Do not call `on_reset()` yourself**: it
+  skips the reseed, and the shown start then differs from the one Reset produces (fixed in 0.2.0).
+  Your own `params.changed` handler only needs the running case: `if session.state != SkSession.State.READY: apply()`.
 * Page-address settings: mark params `.as_class_setting()` and call `params.apply_query(SkHost.query_string())`.
   Out-of-range or unknown values are ignored. `params.class_settings_markdown()` prints the README table.
 * `lock` + `SkParamPanel`: a locked choice row keeps the chosen button enabled-looking and disables the others.
@@ -98,7 +102,10 @@ session.lock_params_after_start = true       # locked_while_running params refus
   `graph.bands = [{"lo":..,"hi":..,"label":..}]`; call `describe()` for a text summary to announce.
 * **Layout**: wrap a main pane and a side pane with `SkSplitView.set_panes(main, side)`.
 * **Log and export**: `var log := SkLog.new(); log.attach(session)` records state changes and parameter changes
-  automatically; `log.table("name", columns)` then `log.add_row(...)` for measurements;
+  automatically; `log.table("name", columns)` then `log.add_row(...)` for measurements. Tables keep every run:
+  calling `table()` again with the same columns (from `on_reset`, say) keeps the rows, and different columns are
+  refused with a warning. Put `session.run_number` in a `run` column to tell runs apart. Rows written for a
+  starting picture that was replaced before it ran are dropped automatically; `clear_table()` empties a table;
   `SkExport.save_json(log)` / `save_table_csv(log, "name")` from a *button the student presses*.
 * **Lesson**: `SkLessonPanel.new().show_lesson(SkLesson.from_dict({...}))` or `SkLesson.from_json(text)`;
   set `panel.log = log` to record answers. Leave fields out to omit sections. Answers are multiple choice only.

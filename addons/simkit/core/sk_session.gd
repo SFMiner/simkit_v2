@@ -9,17 +9,24 @@ extends Node
 ## Three ways to advance time, chosen with `mode`:
 ##   FIXED_STEP  - equal steps of `clock.step`, as many as the frame needs (continuous models).
 ##   CONTINUOUS  - one step per frame with the real (capped) frame time.
-##   MANUAL      - the model steps only when you call step_once() (turn / generation / event driven).
+##   MANUAL      - the model steps only when you call step_once(); it can never run on its own.
+## Generations that should both step and run: FIXED_STEP with clock.step = 1.0 (speed = generations per second).
 ## You may also drive it yourself: set auto_process = false and call advance(delta) from your own loop.
 ##
 ## Guarantees: nothing starts running until start() is called; the model is never stepped while
 ## paused or finished; reset() reproduces the same run (same seed, default state, time zero).
+##
+## If a parameter decides the starting picture, call reset_when_ready_changes() once: a change while READY
+## then calls reset(), which reseeds before on_reset (calling on_reset yourself would not).
 
 # === SIGNALS ===
 signal state_changed(new_state: int)
 ## Emitted after every step (or burst of steps) with the number of steps just taken.
 signal advanced(steps: int)
 signal reset_done
+## Emitted at the very start of reset(), before on_reset. `run_started` is false when the run being
+## replaced never left READY (SkLog uses this to drop rows of a starting picture that was never run).
+signal resetting(run_started: bool)
 signal finished(reason: String)
 
 # === ENUMS ===
@@ -56,6 +63,9 @@ var step_count: int = 0
 var seed_value: int = -1
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var finish_reason: String = ""
+## 1 for the first run, +1 each time reset() replaces a run that had started. Resets while still READY
+## (a settings change, a new seed before Start) keep the number. Put it in your table rows.
+var run_number: int = 0
 
 
 # === LIFECYCLE METHODS ===
@@ -112,6 +122,10 @@ func finish(reason: String = "done") -> void:
 ## Back to the starting state. Keeps the seed unless `reseed` is true (a "new random run").
 ## An explicit `new_seed` >= 0 always wins.
 func reset(reseed: bool = false, new_seed: int = -1) -> void:
+	var run_started: bool = state != State.READY
+	resetting.emit(run_started)
+	if run_started or run_number == 0:
+		run_number += 1
 	if new_seed >= 0:
 		seed_value = new_seed
 	elif reseed or seed_value < 0:
@@ -127,6 +141,17 @@ func reset(reseed: bool = false, new_seed: int = -1) -> void:
 		on_reset.call()
 	_set_state(State.READY)
 	reset_done.emit()
+
+
+## While READY, any change to `p_params` (default: `params`) calls reset(), so the starting picture is
+## rebuilt from a freshly seeded rng and matches what Reset will show. After Start, changes are left to you.
+func reset_when_ready_changes(p_params: SkParams = null) -> void:
+	var p: SkParams = p_params if p_params != null else params
+	if p == null:
+		push_error("SkSession.reset_when_ready_changes: no SkParams given and session.params is not set")
+		return
+	if not p.changed.is_connected(_on_watched_param_changed):
+		p.changed.connect(_on_watched_param_changed)
 
 
 ## One step now, whatever the mode. Allowed in READY and PAUSED (the run then counts as started and
@@ -175,6 +200,7 @@ func describe() -> Dictionary:
 		"mode": Mode.keys()[mode],
 		"state": State.keys()[state],
 		"seed": seed_value,
+		"run": run_number,
 		"sim_time": sim_time,
 		"steps": step_count,
 		"step_length": manual_dt if mode == Mode.MANUAL else clock.step,
@@ -191,6 +217,11 @@ func _do_step(dt: float) -> void:
 	step_count += 1
 	if duration > 0.0 and state != State.FINISHED and sim_time + 1e-9 >= duration:
 		finish("duration")
+
+
+func _on_watched_param_changed(_id: String, _value: Variant) -> void:
+	if state == State.READY:
+		reset()
 
 
 func _set_state(s: State) -> void:

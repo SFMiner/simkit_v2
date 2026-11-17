@@ -46,6 +46,7 @@ func _ready() -> void:
 	session.duration = float(MAX_GENERATIONS)
 	session.params = params
 	session.lock_params_after_start = true
+	session.reset_when_ready_changes()
 	session.seed_value = 2024
 	session.on_step = _on_generation
 	session.on_reset = _on_reset
@@ -69,12 +70,10 @@ func focus_controls() -> Array[Control]:
 
 
 # === PRIVATE ===
-## Before Start the starting picture depends on the settings (e.g. where "balanced" is), so re-derive it.
+## Before Start the session rebuilds the starting picture itself (reset_when_ready_changes, in _ready).
 ## After Start a change only affects the model's rates; the populations carry on from where they are.
 func _on_param_changed(_id: String, _v: Variant) -> void:
-	if session.state == SkSession.State.READY:
-		_on_reset()
-	else:
+	if session.state != SkSession.State.READY:
 		_apply_params()
 
 
@@ -90,8 +89,8 @@ func _on_reset() -> void:
 	model.reset(params.get_int("moths"), params.get_int("start_dark"))
 	graph.clear()
 	graph.append_point("dark", "Dark moths", 0.0, model.dark_fraction() * 100.0)
-	log.table("generations", PackedStringArray(["generation", "dark_moths", "moths"]))
-	log.add_row("generations", [0, model.dark_count(), model.moths.size()])
+	log.table("generations", PackedStringArray(["run", "generation", "dark_moths", "moths"]))   # keeps earlier runs
+	log.add_row("generations", [session.run_number, 0, model.dark_count(), model.moths.size()])
 	field.moths = model.moths
 	field.queue_redraw()
 	if status != null:
@@ -104,7 +103,7 @@ func _on_generation(_dt: float) -> void:
 		session.finish("the moths died out")
 		return
 	graph.append_point("dark", "Dark moths", float(model.generation), model.dark_fraction() * 100.0)
-	log.add_row("generations", [model.generation, model.dark_count(), model.moths.size()])
+	log.add_row("generations", [session.run_number, model.generation, model.dark_count(), model.moths.size()])
 	field.moths = model.moths
 	field.queue_redraw()
 	_update_status("")
