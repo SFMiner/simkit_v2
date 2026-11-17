@@ -12,7 +12,7 @@ extends RefCounted
 ##   - screen-reader text goes to live regions in the HTML shell      -> announce()
 
 # === CONSTANTS ===
-const VERSION: String = "0.1.0"
+const VERSION: String = "0.2.0"
 const LEAVE_MESSAGE_TYPE: String = "sims:leave-game"
 ## Corner (CSS px) kept free of controls so the host page's Full screen button is never covered.
 const RESERVED_CSS: Vector2 = Vector2(200.0, 64.0)

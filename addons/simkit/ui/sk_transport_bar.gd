@@ -6,9 +6,13 @@ extends HFlowContainer
 ##   var bar := SkTransportBar.new()
 ##   bar.speeds = [1.0, 2.0, 4.0]
 ##   bar.bind(session)
-##   # Discrete / event-driven sims: bar.show_play = false; bar.step_text = "Next generation"
+##   # Generations that can also run on their own: session FIXED_STEP with clock.step = 1.0 (one
+##   # generation per step; speed = generations per second); bar.step_text = "Next generation".
+##   # MANUAL-mode sessions cannot run on their own, so the bar never shows Start/Pause for them.
 ##
-## Hotkeys fire only when no focused control has used the key (a focused button takes Space itself).
+## Hotkeys fire only when no focused control has used the key. When a button has keyboard focus, Space
+## belongs to that button: a focused button does not consume the key press (it acts on release), so the
+## Space hotkey stands aside instead of toggling a second time.
 
 # === PUBLIC VARIABLES ===
 var session: SkSession = null
@@ -33,6 +37,10 @@ var _speed_index: int = 0
 # === PUBLIC METHODS ===
 func bind(p_session: SkSession) -> void:
 	session = p_session
+	if show_play and session.mode == SkSession.Mode.MANUAL:
+		# MANUAL sessions never advance by themselves: a Start button would say "Pause" while nothing happens.
+		push_warning("SkTransportBar: MANUAL-mode sessions cannot run on their own, so the Start button is hidden. For Step + Run, use FIXED_STEP with clock.step = 1.0.")
+		show_play = false
 	add_theme_constant_override("h_separation", 6)
 	add_theme_constant_override("v_separation", 6)
 	if show_play:
@@ -99,6 +107,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	match key.keycode:
 		KEY_SPACE:
+			# A focused button presses itself on Space (on release); toggling here too would act twice.
+			if get_viewport().gui_get_focus_owner() is BaseButton:
+				return
 			if show_play:
 				_on_play()
 				get_viewport().set_input_as_handled()

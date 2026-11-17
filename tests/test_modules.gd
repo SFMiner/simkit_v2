@@ -118,6 +118,24 @@ func _test_transport() -> void:
 	root.push_input(r)
 	await frames(1)
 	check(session.state == SkSession.State.READY, "R hotkey resets")
+	# Space on a FOCUSED button (press + release, as a real keyboard sends them) acts exactly once
+	var seen: Array[String] = []
+	session.state_changed.connect(func(st: int) -> void: seen.append(SkSession.State.keys()[st]))
+	bar.play_button.grab_focus()
+	_key(KEY_SPACE)
+	await frames(2)
+	check(seen == ["RUNNING"], "Space on the focused Start button starts once (got %s)" % str(seen))
+	seen.clear()
+	_key(KEY_SPACE)
+	await frames(2)
+	check(seen == ["PAUSED"], "Space on the focused Pause button pauses once (got %s)" % str(seen))
+	session.start()
+	seen.clear()
+	bar.reset_button.grab_focus()
+	_key(KEY_SPACE)
+	await frames(2)
+	check(seen == ["READY"], "Space on the focused Reset button resets without also toggling play (got %s)" % str(seen))
+	bar.reset_button.release_focus()
 	# manual-mode variant: no play button
 	var manual: SkSession = SkSession.new()
 	manual.mode = SkSession.Mode.MANUAL
@@ -135,7 +153,26 @@ func _test_transport() -> void:
 	mbar.step_button.pressed.emit()
 	mbar.step_button.pressed.emit()
 	check(manual.step_count == 2 and not mbar.step_button.disabled, "manual-mode step works repeatedly")
-	_expected += 13
+	# a MANUAL session can never run on its own, so the bar hides Start even if asked to show it
+	var mbar2: SkTransportBar = SkTransportBar.new()
+	mbar2.bind(manual)
+	check(mbar2.play_button == null and mbar2.step_button != null, "MANUAL session: the bar hides Start (nothing could run) and keeps Step")
+	# generations that step AND run: FIXED_STEP with a step of 1.0
+	var gens: Array[int] = [0]
+	var gen: SkSession = SkSession.new()
+	gen.clock.step = 1.0
+	gen.auto_process = false
+	gen.on_step = func(_dt: float) -> void: gens[0] += 1
+	root.add_child(gen)
+	gen.reset()
+	var gbar: SkTransportBar = SkTransportBar.new()
+	gbar.step_text = "Next generation"
+	gbar.bind(gen)
+	gbar.step_button.pressed.emit()
+	gbar.play_button.pressed.emit()
+	gen.advance(3.0)
+	check(gens[0] == 4 and gbar.play_button.text == "Pause", "FIXED_STEP with step 1.0: Next generation steps once, Start runs one generation per second")
+	_expected += 18
 
 
 func _test_viz() -> void:
@@ -196,6 +233,8 @@ func _test_data() -> void:
 	log.record_response("p1", "Will it rise?", "yes, \"a lot\"")
 	log.table("pop", PackedStringArray(["t", "n"]))
 	check(log.add_row("pop", [0.0, 5]) and log.add_row("pop", [1.0, 7]), "table rows added")
+	check(log.table("pop", PackedStringArray(["t", "n"])) and (log.tables["pop"]["rows"] as Array).size() == 2, "table() again with the same columns keeps the rows")
+	check(not log.table("pop", PackedStringArray(["t"])) and (log.tables["pop"]["columns"] as PackedStringArray).size() == 2, "table() with different columns is refused and changes nothing")
 	check(not log.add_row("pop", [1.0]) and not log.add_row("nope", [1, 2]), "wrong-length row and unknown table refused")
 	log.keep_run("A", {"n": [5, 7]}, {"note": "first"})
 	check(log.count("param") == 1 and log.count("state") == 2 and log.count("reset") == 1, "attach() recorded one param change, two state changes (RUNNING, PAUSED) and one reset")
@@ -223,7 +262,24 @@ func _test_data() -> void:
 	for i: int in range(SkLog.MAX_EVENTS + 10):
 		log.record("x")
 	check(log.events.size() == SkLog.MAX_EVENTS, "event log is capped")
-	_expected += 15
+	# runs: every started run is kept; the rows of a starting picture replaced before it ran are dropped
+	var rs: SkSession = SkSession.new()
+	rs.auto_process = false
+	root.add_child(rs)
+	var rl: SkLog = SkLog.new()
+	rl.attach(rs)
+	rs.on_reset = func() -> void:
+		rl.table("g", PackedStringArray(["run", "gen"]))
+		rl.add_row("g", [rs.run_number, 0])
+	rs.reset()       # run 1: starting picture
+	rs.reset()       # a settings change while READY replaces it
+	rs.step_once()
+	rl.add_row("g", [rs.run_number, 1])
+	rs.reset()       # run 2: starting picture
+	check(rl.tables["g"]["rows"] == [[1, 0], [1, 1], [2, 0]], "runs are kept across resets; an unstarted starting picture is replaced, not duplicated (got %s)" % str(rl.tables["g"]["rows"]))
+	check(rl.clear_table("g") and (rl.tables["g"]["rows"] as Array).is_empty() and not rl.clear_table("nope"), "clear_table empties a table on purpose")
+	rs.queue_free()
+	_expected += 19
 
 
 func _test_lesson() -> void:
@@ -287,3 +343,14 @@ func _test_split() -> void:
 			count += 1
 	check(count == 2, "split: each pane exists exactly once after switching")
 	_expected += 5
+
+
+func _key(keycode: Key) -> void:
+	var down: InputEventKey = InputEventKey.new()
+	down.keycode = keycode
+	down.physical_keycode = keycode
+	down.pressed = true
+	root.push_input(down)
+	var up: InputEventKey = down.duplicate()
+	up.pressed = false
+	root.push_input(up)

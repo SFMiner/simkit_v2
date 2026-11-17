@@ -61,6 +61,7 @@ func _ready() -> void:
 	session.duration = MONTHS
 	session.params = params
 	session.lock_params_after_start = true
+	session.reset_when_ready_changes()
 	session.on_step = _on_step
 	session.on_reset = _on_reset
 	session.finished.connect(func(reason: String) -> void: _say_summary("Finished: " + reason))
@@ -91,12 +92,10 @@ func focus_controls() -> Array[Control]:
 
 
 # === PRIVATE ===
-## Before Start the starting picture depends on the settings (e.g. where "balanced" is), so re-derive it.
+## Before Start the session rebuilds the starting picture itself (reset_when_ready_changes, in _ready).
 ## After Start a change only affects the model's rates; the populations carry on from where they are.
 func _on_param_changed(_id: String, _v: Variant) -> void:
-	if session.state == SkSession.State.READY:
-		_on_reset()
-	else:
+	if session.state != SkSession.State.READY:
 		_apply_params()
 
 
@@ -124,7 +123,7 @@ func _on_reset() -> void:
 	model.reset(params.get_int("start"))
 	graph.remove_series("rabbits")
 	graph.remove_series("foxes")
-	log.table("populations", PackedStringArray(["month", "rabbits", "foxes"]))
+	log.table("populations", PackedStringArray(["run", "month", "rabbits", "foxes"]))   # keeps earlier runs
 	_next_sample = 0.0
 	_announced_extinct.clear()
 	_sample(0.0)
@@ -144,7 +143,7 @@ func _on_step(dt: float) -> void:
 func _sample(t: float) -> void:
 	graph.append_point("rabbits", "Rabbits", t, model.rabbits)
 	graph.append_point("foxes", "Foxes", t, model.foxes)
-	log.add_row("populations", [snappedf(t, 0.01), snappedf(model.rabbits, 0.01), snappedf(model.foxes, 0.01)])
+	log.add_row("populations", [session.run_number, snappedf(t, 0.01), snappedf(model.rabbits, 0.01), snappedf(model.foxes, 0.01)])
 	field.rabbits = model.rabbits
 	field.foxes = model.foxes
 	field.queue_redraw()

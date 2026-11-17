@@ -138,6 +138,38 @@ func run() -> void:
 	lk.finish("x")
 	check(not params.locked, "params unlock when the run finishes")
 
+	# --- run numbers: a reset replacing a started run counts a new run; READY resets do not
+	var rn: SkSession = _make(SkSession.Mode.FIXED_STEP)
+	var flags: Array[bool] = []
+	rn.resetting.connect(func(started: bool) -> void: flags.append(started))
+	check(rn.run_number == 1, "run_number is 1 after the first reset")
+	rn.reset()
+	rn.reset(true)
+	check(rn.run_number == 1 and flags == [false, false], "resets while READY keep the run number and say the run never started")
+	rn.step_once()
+	rn.reset()
+	check(rn.run_number == 2 and flags[-1] == true and rn.describe()["run"] == 2, "a reset after the run started counts run 2 (and describe() reports it)")
+
+	# --- reset_when_ready_changes: the starting picture after a READY change is the one Reset replays
+	var rp: SkParams = SkParams.new()
+	rp.add(SkParam.int_param("n", "N", 10, 1, 100, 1))
+	var rr: SkSession = SkSession.new()
+	rr.auto_process = false
+	var pic: Array[float] = [0.0]
+	rr.on_reset = func() -> void: pic[0] = rr.rng.randf()
+	rr.params = rp
+	root.add_child(rr)
+	rr.reset(false, 1234)
+	rr.reset_when_ready_changes()
+	rp.set_value("n", 20)
+	var shown: float = pic[0]
+	rr.reset()
+	check(shown == pic[0], "reset_when_ready_changes: a READY change shows the same start that Reset replays")
+	rr.start()
+	var before_running_change: float = pic[0]
+	rp.set_value("n", 30)
+	check(rr.is_running() and pic[0] == before_running_change, "reset_when_ready_changes: a change while RUNNING does not reset")
+
 	# --- auto_process drives the session from _process
 	var auto: SkSession = SkSession.new()
 	auto.on_step = _step
@@ -149,4 +181,4 @@ func run() -> void:
 	auto.start()
 	await create_timer(0.3).timeout
 	check(steps_taken.size() > 0, "auto_process steps a RUNNING session from _process")
-	finish(33)
+	finish(38)
