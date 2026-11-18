@@ -14,12 +14,19 @@ extends VBoxContainer
 signal choice_made(prompt_id: String, choice_index: int, choice_text: String)
 signal explanation_shown
 
+# === CONSTANTS ===
+## Vocabulary terms longer than this are shown one per line, wrapping, instead of side by side.
+const LONG_TERM: int = 24
+
 # === PUBLIC VARIABLES ===
 ## Optional. Any object with record_response(prompt_id, prompt, choice) and record(kind, data) - normally an
 ## SkLog. Untyped on purpose, so this module works without the data module.
 var log: Object = null
 ## Investigate-then-explain: the explanation button stays disabled until a prediction is made (if there is one).
 var explanation_requires_prediction: bool = false
+## Once the explanation is shown the prediction can no longer be changed (its buttons are disabled), so the
+## log holds the prediction the student made before seeing the answer.
+var lock_prediction_on_explanation: bool = true
 var lesson: SkLesson = null
 var toggle_button: Button = null
 var explanation_button: Button = null
@@ -30,6 +37,7 @@ var _controls: Array[Control] = []
 var _explanation_label: Label = null
 var _definition_label: Label = null
 var _prediction_made: bool = false
+var _prediction_buttons: Array[Button] = []
 
 
 # === PUBLIC METHODS ===
@@ -38,12 +46,15 @@ func show_lesson(p_lesson: SkLesson) -> void:
 		child.queue_free()
 		remove_child(child)
 	_controls.clear()
+	_prediction_buttons.clear()
 	_prediction_made = false
 	lesson = p_lesson
 	if lesson == null or lesson.is_empty():
 		return
 	add_theme_constant_override("separation", 8)
-	toggle_button = SkUi.button("Lesson: %s (hide)" % lesson.title if lesson.title != "" else "Lesson (hide)", true)
+	if lesson.title != "":
+		add_child(SkUi.label("Lesson: " + lesson.title, 0, true))
+	toggle_button = SkUi.button("Lesson (hide)", true)
 	toggle_button.button_pressed = true
 	toggle_button.toggled.connect(_on_toggle)
 	add_child(toggle_button)
@@ -76,12 +87,13 @@ func show_lesson(p_lesson: SkLesson) -> void:
 		_add_prompt(p, "Reflect", false)
 	if not lesson.vocabulary.is_empty():
 		_body.add_child(SkUi.label("Words to know (select one)", 0, true))
-		var flow: HFlowContainer = HFlowContainer.new()
-		flow.add_theme_constant_override("h_separation", 6)
-		flow.add_theme_constant_override("v_separation", 6)
+		var long_terms: bool = false
+		for term: String in lesson.vocabulary:
+			long_terms = long_terms or term.length() > LONG_TERM
+		var flow: Container = VBoxContainer.new() if long_terms else _flow()
 		_body.add_child(flow)
 		for term: String in lesson.vocabulary:
-			var b: Button = SkUi.button(term)
+			var b: Button = SkUi.button(term, false, long_terms)
 			b.pressed.connect(_on_term.bind(term))
 			flow.add_child(b)
 			_controls.append(b)
@@ -104,20 +116,31 @@ func _add_prompt(p: Dictionary, kind_label: String, is_prediction: bool) -> void
 	var choices: PackedStringArray = p["choices"]
 	if choices.is_empty():
 		return
+	# One choice per line, wrapping: a long answer never widens the side pane.
+	var list: VBoxContainer = VBoxContainer.new()
+	list.add_theme_constant_override("separation", 6)
+	_body.add_child(list)
+	var group: ButtonGroup = ButtonGroup.new()
+	for i: int in range(choices.size()):
+		var b: Button = SkUi.button(choices[i], true, true)
+		b.button_group = group
+		b.pressed.connect(_on_choice.bind(p, i, is_prediction))
+		list.add_child(b)
+		_controls.append(b)
+		if is_prediction:
+			_prediction_buttons.append(b)
+
+
+func _flow() -> HFlowContainer:
 	var flow: HFlowContainer = HFlowContainer.new()
 	flow.add_theme_constant_override("h_separation", 6)
 	flow.add_theme_constant_override("v_separation", 6)
-	_body.add_child(flow)
-	var group: ButtonGroup = ButtonGroup.new()
-	for i: int in range(choices.size()):
-		var b: Button = SkUi.button(choices[i], true)
-		b.button_group = group
-		b.pressed.connect(_on_choice.bind(p, i, is_prediction))
-		flow.add_child(b)
-		_controls.append(b)
+	return flow
 
 
 func _on_choice(p: Dictionary, index: int, is_prediction: bool) -> void:
+	if is_prediction and lock_prediction_on_explanation and _explanation_label != null and _explanation_label.visible:
+		return   # the prediction is final once the explanation has been seen
 	var text: String = (p["choices"] as PackedStringArray)[index]
 	if log != null and log.has_method("record_response"):
 		log.record_response(str(p["id"]), str(p["prompt"]), text)
@@ -136,6 +159,11 @@ func _on_show_explanation() -> void:
 	if explanation_button != null:
 		explanation_button.disabled = true
 		explanation_button.text = "Explanation shown"
+	if lock_prediction_on_explanation:
+		# The chosen answer stays enabled so it keeps its pressed look (a disabled Button loses it); presses
+		# on it are ignored in _on_choice.
+		for b: Button in _prediction_buttons:
+			b.disabled = not b.button_pressed
 	if log != null and log.has_method("record"):
 		log.record("explanation_shown")
 	SkHost.announce(lesson.explanation)

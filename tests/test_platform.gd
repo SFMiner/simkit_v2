@@ -121,6 +121,15 @@ func run() -> void:
 		check(_contrast(q.focus, q.bg) >= 3.0, "palette '%s': focus outline vs background >= 3:1 (WCAG non-text)" % name2)
 		check(_contrast(q.on_pressed, q.button_pressed) >= 4.5, "palette '%s': text on a selected (pressed) button >= 4.5:1" % name2)
 	check(SkTheme.series_color(0) != SkTheme.series_color(1) and SkTheme.series_color(8) == SkTheme.series_color(0), "series colours cycle")
+	var low: Array[String] = []
+	for pname: String in ["dark", "light", "high_contrast"]:
+		var graph_bg: Color = SkTheme.build(pname).get_color("bg", "SkChart")
+		for i: int in range(SkTheme.SERIES.size()):
+			var col: Color = SkTheme.series_color(i, pname)
+			if _contrast(col, graph_bg) < 3.0:
+				low.append("%s #%d %.2f" % [pname, i, _contrast(col, graph_bg)])
+	check(low.is_empty(), "every graph line colour has >= 3:1 contrast on the graph background in every palette (WCAG 1.4.11): %s" % str(low))
+	check(SkTheme.build("light").get_color("series_0", "SkChart") == SkTheme.SERIES_LIGHT[0] and SkTheme.build("dark").get_color("series_0", "SkChart") == SkTheme.SERIES[0], "the theme carries the palette's series colours for graphs")
 
 	# --- SkA11y
 	var a: SkA11y = SkA11y.new()
@@ -142,6 +151,17 @@ func run() -> void:
 	check(panel_root.theme != null and approx(sc.text_scale, 1.4), "bind applies theme and text size immediately")
 	a.params.set_value("high_contrast", false)
 	check(fired[0] == 1 and panel_root.theme.get_color("text", "SkChart") == SkTheme.palette("dark").text, "bind re-applies the theme after a change")
+	# bind holds its targets weakly and no reference cycle keeps an SkA11y alive
+	var d: SkA11y = SkA11y.new()
+	d.persist = false
+	var d_root: Control = Control.new()
+	root.add_child(d_root)
+	d.bind(d_root)
+	d_root.free()
+	d.params.set_value("high_contrast", true)
+	var d_ref: WeakRef = weakref(d)
+	d = null
+	check(d_ref.get_ref() == null, "a bound SkA11y is freed when the game drops it, and a freed target is skipped")
 	# persistence
 	var b: SkA11y = SkA11y.new()
 	b.save_path = "user://simkit_test_a11y.cfg"
@@ -152,7 +172,7 @@ func run() -> void:
 	c.load_saved()
 	check(approx(c.text_scale(), 1.2) and c.reduced_motion() and not c.high_contrast(), "player's choices persist and reload; untouched settings stay default")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://simkit_test_a11y.cfg"))
-	finish(45)
+	finish(48)
 
 
 ## WCAG relative-luminance contrast ratio.

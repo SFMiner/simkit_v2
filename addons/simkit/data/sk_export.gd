@@ -23,6 +23,8 @@ static func to_json(log: SkLog, extra: Dictionary = {}) -> String:
 		"events": log.events,
 		"tables": tables,
 		"kept_runs": log.kept_runs,
+		"dropped_events": log.dropped_events,
+		"dropped_rows": log.dropped_rows,
 	}
 	out.merge(extra, false)
 	return JSON.stringify(out, "\t")

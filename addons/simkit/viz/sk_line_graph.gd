@@ -269,7 +269,8 @@ func _draw() -> void:
 		var pts: PackedVector2Array = s["points"]
 		if pts.is_empty():
 			continue
-		var color: Color = SkTheme.series_color(i)
+		var slot: String = "series_%d" % posmod(i, SkTheme.SERIES.size())
+		var color: Color = get_theme_color(slot, "SkChart") if has_theme_color(slot, "SkChart") else SkTheme.series_color(i)
 		var screen: PackedVector2Array = PackedVector2Array()
 		for p: Vector2 in pts:
 			screen.append(_to_point(plot, xr, yr, p))

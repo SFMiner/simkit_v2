@@ -27,6 +27,7 @@ var _narrow_scroll: ScrollContainer = ScrollContainer.new()
 var _narrow_box: VBoxContainer = VBoxContainer.new()
 var _narrow: bool = false
 var _built: bool = false
+var _warned: Dictionary = {}
 
 
 # === LIFECYCLE METHODS ===
@@ -64,6 +65,26 @@ func set_panes(p_main: Control, p_side: Control) -> void:
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_built = true
 	_place(size.x < narrow_below)
+	if OS.is_debug_build():
+		for pane: Control in [main, side]:
+			if not pane.minimum_size_changed.is_connected(_check_widths):
+				pane.minimum_size_changed.connect(_check_widths)
+
+
+## Panes whose minimum width is more than the width they get: [pane name, minimum, available]. SkSplitView
+## never scrolls sideways, so anything in such a pane is cut off at the right edge. A long label or button
+## that does not wrap, or a row of fixed-width controls, is the usual cause.
+func too_wide_panes() -> Array[Array]:
+	var out: Array[Array] = []
+	if not _built:
+		return out
+	var avail_side: float = size.x if _narrow else side_width
+	var avail_main: float = size.x if _narrow else size.x - side_width - 12.0
+	if side.get_combined_minimum_size().x > avail_side + 0.5:
+		out.append(["side", side.get_combined_minimum_size().x, avail_side])
+	if main.get_combined_minimum_size().x > avail_main + 0.5:
+		out.append(["main", main.get_combined_minimum_size().x, avail_main])
+	return out
 
 
 func is_narrow() -> bool:
@@ -74,6 +95,20 @@ func is_narrow() -> bool:
 func _relayout() -> void:
 	if _built and (size.x < narrow_below) != _narrow:
 		_place(size.x < narrow_below)
+	if OS.is_debug_build():
+		_check_widths()
+
+
+## Debug builds: warn once per pane and layout when a pane is wider than its room.
+func _check_widths() -> void:
+	if not _built or size.x <= 0.0:
+		return
+	for row: Array in too_wide_panes():
+		var key: String = "%s/%s" % [row[0], "narrow" if _narrow else "wide"]
+		if not _warned.has(key):
+			_warned[key] = true
+			push_warning("SkSplitView: the %s pane needs %.0f px but gets %.0f px (%s layout), so it is cut off. Let long text wrap (SkUi.button(text, toggle, true), SkUi.label(text, 0, true)) or stack wide rows." % [
+					row[0], row[1], row[2], "stacked" if _narrow else "side-by-side"])
 
 
 func _place(narrow: bool) -> void:

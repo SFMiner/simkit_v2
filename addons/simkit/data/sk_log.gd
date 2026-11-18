@@ -16,10 +16,18 @@ extends RefCounted
 ## add session.run_number as a column to tell runs apart. When attached, rows written for a starting
 ## picture that was replaced before it ever ran (a settings change or new seed while READY) are dropped,
 ## so the export holds each real run once. clear_table() empties a table on purpose.
+##
+## Limits: consecutive changes of one parameter are merged into one "param" event (with a "changes" count).
+## Past MAX_EVENTS only the run's lifecycle and the student's answers are kept; anything else is counted in
+## dropped_events, after one "log_full" event. Rows past MAX_ROWS are counted in dropped_rows. Nothing is
+## lost without a count, and the JSON export carries both counts. detach() stops recording.
 
 # === CONSTANTS ===
 const MAX_EVENTS: int = 5000
 const MAX_ROWS: int = 20000
+## Event kinds still recorded after MAX_EVENTS is reached: the run's lifecycle and the student's answers.
+const KEPT_KINDS: PackedStringArray = ["state", "reset", "finished", "response", "explanation_shown"]
+const KEPT_RESERVE: int = 1000
 
 # === PUBLIC VARIABLES ===
 var app_name: String = "simulation"
@@ -33,6 +41,10 @@ var tables: Dictionary = {}
 var kept_runs: Dictionary = {}
 var session: SkSession = null
 var params: SkParams = null
+## Events not recorded because the log was full (see record()). SkExport.to_json includes it.
+var dropped_events: int = 0
+## Rows refused because their table held MAX_ROWS rows. SkExport.to_json includes it.
+var dropped_rows: int = 0
 
 # === PRIVATE VARIABLES ===
 var _started_ms: int = Time.get_ticks_msec()
@@ -42,23 +54,46 @@ var _counter: int = 0
 # === PUBLIC METHODS ===
 ## Records session lifecycle and parameter changes automatically.
 func attach(p_session: SkSession, p_params: SkParams = null) -> void:
+	detach()
 	session = p_session
 	params = p_params if p_params != null else p_session.params
-	session.state_changed.connect(func(s: int) -> void:
-		record("state", {"state": SkSession.State.keys()[s]}))
-	session.reset_done.connect(func() -> void: record("reset", {"seed": session.seed_value}))
-	session.finished.connect(func(reason: String) -> void: record("finished", {"reason": reason}))
-	if not session.resetting.is_connected(_on_resetting):
-		session.resetting.connect(_on_resetting)
+	# Bound methods, not lambdas: a lambda that captures this log, connected to a signal of an object the
+	# log holds, is a reference cycle and neither is ever freed.
+	session.state_changed.connect(_on_state_changed)
+	session.reset_done.connect(_on_reset_done)
+	session.finished.connect(_on_finished)
+	session.resetting.connect(_on_resetting)
 	if params != null:
-		params.changed.connect(func(id: String, v: Variant) -> void:
-			record("param", {"id": id, "value": _plain(params.spec(id), v)}))
+		params.changed.connect(_on_param_changed)
+
+
+## Stops recording the session and parameters (attach() again to resume). Safe to call when not attached.
+func detach() -> void:
+	if session != null:
+		for pair: Array in [[session.state_changed, _on_state_changed], [session.reset_done, _on_reset_done],
+				[session.finished, _on_finished], [session.resetting, _on_resetting]]:
+			if (pair[0] as Signal).is_connected(pair[1]):
+				(pair[0] as Signal).disconnect(pair[1])
+	if params != null and params.changed.is_connected(_on_param_changed):
+		params.changed.disconnect(_on_param_changed)
+	session = null
+	params = null
 
 
 ## Adds an event. `data` should hold only numbers, strings, bools and arrays/dictionaries of them.
+## Past MAX_EVENTS, only the kinds in KEPT_KINDS are still recorded (up to MAX_EVENTS + KEPT_RESERVE);
+## the rest are counted in dropped_events, and one "log_full" event marks where dropping began.
 func record(kind: String, data: Dictionary = {}) -> void:
 	if events.size() >= MAX_EVENTS:
-		return
+		if not KEPT_KINDS.has(kind) or events.size() >= MAX_EVENTS + KEPT_RESERVE:
+			if dropped_events == 0:
+				_append("log_full", {"max_events": MAX_EVENTS})
+			dropped_events += 1
+			return
+	_append(kind, data)
+
+
+func _append(kind: String, data: Dictionary) -> void:
 	events.append({
 		"n": _counter,
 		"ms": Time.get_ticks_msec() - _started_ms,
@@ -104,7 +139,10 @@ func add_row(name: String, row: Array) -> bool:
 	if not tables.has(name):
 		return false
 	var t: Dictionary = tables[name]
-	if row.size() != (t["columns"] as PackedStringArray).size() or (t["rows"] as Array).size() >= MAX_ROWS:
+	if row.size() != (t["columns"] as PackedStringArray).size():
+		return false
+	if (t["rows"] as Array).size() >= MAX_ROWS:
+		dropped_rows += 1
 		return false
 	(t["rows"] as Array).append(row.duplicate())
 	var runs: PackedInt32Array = t.get("runs", PackedInt32Array())
@@ -130,6 +168,8 @@ func clear() -> void:
 	responses.clear()
 	tables.clear()
 	kept_runs.clear()
+	dropped_events = 0
+	dropped_rows = 0
 	_counter = 0
 	_started_ms = Time.get_ticks_msec()
 
@@ -144,6 +184,32 @@ func count(kind: String) -> int:
 
 
 # === PRIVATE METHODS ===
+func _on_state_changed(s: int) -> void:
+	record("state", {"state": SkSession.State.keys()[s]})
+
+
+func _on_reset_done() -> void:
+	record("reset", {"seed": session.seed_value if session != null else 0})
+
+
+func _on_finished(reason: String) -> void:
+	record("finished", {"reason": reason})
+
+
+## A run of changes to one parameter with nothing else in between (a slider drag, repeated clicks) is one
+## event: its value is the latest, "changes" counts them. This keeps a long drag from filling the log.
+func _on_param_changed(id: String, v: Variant) -> void:
+	var value: Variant = _plain(params.spec(id) if params != null else null, v)
+	if not events.is_empty() and dropped_events == 0:
+		var last: Dictionary = events[events.size() - 1]
+		if last["kind"] == "param" and last["data"].get("id", "") == id:
+			last["data"]["value"] = value
+			last["data"]["changes"] = int(last["data"].get("changes", 1)) + 1
+			last["ms"] = Time.get_ticks_msec() - _started_ms
+			return
+	record("param", {"id": id, "value": value, "changes": 1})
+
+
 ## The run being replaced never started: its rows only described a starting picture that is now gone.
 func _on_resetting(run_started: bool) -> void:
 	if run_started or session == null or session.run_number <= 0:

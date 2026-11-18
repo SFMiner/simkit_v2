@@ -5,8 +5,8 @@ It removes the parts every simulation re-implements: parameters and limits, star
 clock, a theme, accessibility settings, keyboard handling for web iframes, graphs, optional lessons and data
 export, and the web export. It does **not** include any scientific model, and it never asks you to inherit from anything.
 
-Status: version 0.2.0. 280 automated checks pass on Godot 4.7.2 and 4.5. The demos' web export was checked in
-real Chromium for 0.1.0; for 0.2.0, two simulations built on the kit passed a 45-check run in Chrome. See "Verified / not verified" below, and "Changes" at the end.
+Status: version 0.3.0. 294 automated checks pass on Godot 4.7.2 (0.2.0 also passed on 4.5; 0.3.0 was not rerun there). The demos' web export was checked in
+real Chromium for 0.1.0; for 0.2.0 and 0.3.0, two simulations built on the kit passed a 45-check run in Chrome. See "Verified / not verified" below, and "Changes" at the end.
 
 ## Quick start
 
@@ -62,7 +62,7 @@ random, turn-driven, no lesson or gauge) and *Cooling coffee* (38 lines of code)
 ## Tests
 
 ```bash
-GODOT=godot bash tests/run_all.sh                       # 7 suites, 280 checks
+GODOT=godot bash tests/run_all.sh                       # 7 suites, 294 checks
 bash addons/simkit/deploy/export_web.sh . exports/web   # export + contract checks (needs 4.7 export templates)
 ```
 
@@ -82,6 +82,21 @@ colour-blind viewing, the real sims site, a lean web template, a 4.5 web export,
 Licence: not set (yours to choose). Third-party code: none. Engine: Godot (MIT).
 
 ## Changes
+
+**0.3.0** (2026-11-17): fixes for the six moderate findings of the independent audit.
+- **No more leaks**: `SkLog`, `SkA11y` and the transport bar connect methods, not lambdas, so a reloaded scene
+  frees its log, parameters and settings. `SkA11y.bind` holds its targets weakly. New `SkLog.detach()`.
+- **The event log never loses data silently**: a slider drag is one event with a `changes` count; past the cap the
+  run's lifecycle and the student's answers are still kept, and `dropped_events` / `dropped_rows` are in the export.
+- **A prediction is final once the explanation is shown** (`SkLessonPanel.lock_prediction_on_explanation`, on by
+  default).
+- **Graph lines are visible in the light palette**: darker colour-blind-safe line colours there, carried in the
+  theme so graphs pick them up; every colour is at least 3:1 on the graph background in all three palettes.
+- **Long text wraps**: `SkUi.button(..., wrap)`; lesson answers are one per line and wrap; the lesson title is a
+  wrapping label above a short "Lesson (hide)" toggle. `SkSplitView` warns in debug builds when a pane is wider
+  than its room.
+- **`export_web.sh` can be trusted**: relative output paths work, a failed export stops before any OK line, and the
+  `.pck` scan uses Python instead of `strings` (which was missing in Git Bash and made the scan pass silently).
 
 **0.2.0** (2026-11-17): fixes for the four blocking findings of the independent audit.
 - **Space on a focused transport button acts once.** The Space hotkey now stands aside when a button has keyboard

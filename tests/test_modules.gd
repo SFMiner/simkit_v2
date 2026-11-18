@@ -261,7 +261,31 @@ func _test_data() -> void:
 	check(log.events.is_empty() and log.tables.is_empty() and log.kept_runs.is_empty(), "clear")
 	for i: int in range(SkLog.MAX_EVENTS + 10):
 		log.record("x")
-	check(log.events.size() == SkLog.MAX_EVENTS, "event log is capped")
+	check(log.events.size() == SkLog.MAX_EVENTS + 1 and log.events[-1]["kind"] == "log_full" and log.dropped_events == 10, "event log is capped; one log_full marker and a count of what was dropped")
+	log.record("finished", {"reason": "done"})
+	log.record_response("p2", "Again?", "no")
+	check(log.count("finished") == 1 and log.count("response") == 1 and log.dropped_events == 10, "lifecycle events and answers are still kept past the cap")
+	var full: Dictionary = JSON.parse_string(SkExport.to_json(log))
+	check(int(full["dropped_events"]) == 10 and int(full["dropped_rows"]) == 0, "the JSON export carries dropped_events and dropped_rows")
+	log.clear()
+	check(log.dropped_events == 0, "clear() resets the dropped count")
+	# a slider drag is one event
+	for v: float in [0.2, 0.4, 0.6, 0.8]:
+		params.set_value("rate", v)
+	params.set_value("mode", 0)
+	params.set_value("rate", 1.5)
+	var pe: Array = log.events.filter(func(e: Dictionary) -> bool: return e["kind"] == "param")
+	check(pe.size() == 3 and pe[0]["data"]["changes"] == 4 and is_equal_approx(float(pe[0]["data"]["value"]), 0.8) and pe[1]["data"]["id"] == "mode", "consecutive changes of one parameter merge into one event with a count (got %s)" % str(pe.map(func(e: Dictionary) -> Dictionary: return e["data"])))
+	# detach, and no reference cycle
+	log.detach()
+	params.set_value("rate", 0.1)
+	check(log.count("param") == 3 and log.session == null, "detach() stops recording")
+	var leak_log: SkLog = SkLog.new()
+	leak_log.attach(session)
+	var leak_ref: WeakRef = weakref(leak_log)
+	leak_log = null
+	check(leak_ref.get_ref() == null, "an attached SkLog is freed when the game drops it (no reference cycle)")
+	params.set_value("rate", 0.3)   # its connections went with it: no error
 	# runs: every started run is kept; the rows of a starting picture replaced before it ran are dropped
 	var rs: SkSession = SkSession.new()
 	rs.auto_process = false
@@ -279,7 +303,7 @@ func _test_data() -> void:
 	check(rl.tables["g"]["rows"] == [[1, 0], [1, 1], [2, 0]], "runs are kept across resets; an unstarted starting picture is replaced, not duplicated (got %s)" % str(rl.tables["g"]["rows"]))
 	check(rl.clear_table("g") and (rl.tables["g"]["rows"] as Array).is_empty() and not rl.clear_table("nope"), "clear_table empties a table on purpose")
 	rs.queue_free()
-	_expected += 19
+	_expected += 25
 
 
 func _test_lesson() -> void:
@@ -300,6 +324,7 @@ func _test_lesson() -> void:
 	var focus: Array[Control] = panel.focus_controls()
 	# order: toggle, prediction yes/no, obs a/b, explanation button, term
 	check(focus.size() == 1 + 2 + 2 + 1 + 1, "focus list has toggle, prediction, observation, explanation, vocabulary (got %d)" % focus.size())
+	(focus[2] as Button).button_pressed = true   # what a real click does before emitting pressed
 	(focus[2] as Button).pressed.emit()
 	check(made == [["p", 1, "no"]] and not panel.explanation_button.disabled, "prediction recorded; explanation unlocked")
 	check(log.responses.size() == 1 and log.responses[0]["choice"] == "no", "response written to the log")
@@ -308,6 +333,8 @@ func _test_lesson() -> void:
 	panel.explanation_button.pressed.emit()
 	panel.explanation_button.pressed.emit()
 	check(shown[0] == 1 and log.count("explanation_shown") == 1, "explanation revealed once and logged once")
+	(focus[2] as Button).pressed.emit()
+	check((focus[1] as Button).disabled and (focus[2] as Button).button_pressed and log.responses.size() == 1 and not (focus[3] as Button).disabled, "showing the explanation locks the prediction (the chosen answer keeps its look, other answers are disabled, nothing more is logged), not the other prompts")
 	(focus[focus.size() - 1] as Button).pressed.emit()
 	check(log.count("vocabulary") == 1, "vocabulary lookup logged")
 	panel.toggle_button.button_pressed = false
@@ -315,7 +342,26 @@ func _test_lesson() -> void:
 	var empty_panel: SkLessonPanel = SkLessonPanel.new()
 	empty_panel.show_lesson(SkLesson.new())
 	check(empty_panel.get_child_count() == 0 and empty_panel.focus_controls().is_empty(), "an empty lesson builds nothing")
-	_expected += 11
+	var open_panel: SkLessonPanel = SkLessonPanel.new()
+	open_panel.lock_prediction_on_explanation = false
+	open_panel.show_lesson(lesson)
+	open_panel.reveal_explanation()
+	check(not (open_panel.focus_controls()[1] as Button).disabled, "lock_prediction_on_explanation = false leaves the prediction open")
+	open_panel.free()
+	# long text wraps instead of widening the side pane
+	var col: VBoxContainer = VBoxContainer.new()
+	col.size = Vector2(420, 600)
+	root.add_child(col)
+	var long_panel: SkLessonPanel = SkLessonPanel.new()
+	long_panel.show_lesson(SkLesson.from_dict({"title": "Population genetics of island lizards after a hurricane in the Caribbean",
+			"prediction": {"prompt": "x", "choices": ["The population will become more varied over time because of mutation"]},
+			"vocabulary": {"natural selection in a changing environment": "d"}}))
+	col.add_child(long_panel)
+	await frames(2)
+	check(long_panel.get_combined_minimum_size().x <= 420.0 and (long_panel.focus_controls()[1] as Button).size.y > SkUi.TOUCH_MIN, "long title, choices and terms wrap within a 420 px pane (min width %.0f)" % long_panel.get_combined_minimum_size().x)
+	col.queue_free()
+	empty_panel.free()
+	_expected += 14
 
 
 func _test_split() -> void:
@@ -342,7 +388,14 @@ func _test_split() -> void:
 		if n == main_pane or n == side_pane:
 			count += 1
 	check(count == 2, "split: each pane exists exactly once after switching")
-	_expected += 5
+	check(split.too_wide_panes().is_empty(), "split: no pane is wider than its room")
+	var wide_row: Control = Control.new()
+	wide_row.custom_minimum_size.x = 600.0
+	side_pane.add_child(wide_row)
+	await frames(1)
+	var tw: Array[Array] = split.too_wide_panes()
+	check(tw.size() == 1 and tw[0][0] == "side" and is_equal_approx(float(tw[0][2]), split.side_width), "split: a side pane wider than side_width is reported (%s)" % str(tw))
+	_expected += 7
 
 
 func _key(keycode: Key) -> void:
