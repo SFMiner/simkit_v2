@@ -172,7 +172,27 @@ func _test_transport() -> void:
 	gbar.play_button.pressed.emit()
 	gen.advance(3.0)
 	check(gens[0] == 4 and gbar.play_button.text == "Pause", "FIXED_STEP with step 1.0: Next generation steps once, Start runs one generation per second")
-	_expected += 18
+	# Button wording
+	var ws: SkSession = SkSession.new()
+	ws.auto_process = false
+	root.add_child(ws)
+	var wbar: SkTransportBar = SkTransportBar.new()
+	wbar.texts.start = "Run"
+	wbar.texts.reset = "Start over"
+	wbar.bind(ws)
+	ws.reset()
+	var first: String = wbar.play_button.text
+	ws.start()
+	var running: String = wbar.play_button.text
+	wbar.texts.pause = "Hold"
+	wbar.refresh()
+	check(first == "Run" and wbar.reset_button.text == "Start over" and running == "Pause" and wbar.play_button.text == "Hold", "texts sets the button wording, survives resets and state changes, and refresh() applies a change")
+	wbar.texts.erase("resume")
+	ws.pause()
+	check(wbar.play_button.text == "Resume", "a missing texts key falls back to the default wording")
+	wbar.free()
+	ws.queue_free()
+	_expected += 20
 
 
 func _test_viz() -> void:
@@ -303,7 +323,19 @@ func _test_data() -> void:
 	check(rl.tables["g"]["rows"] == [[1, 0], [1, 1], [2, 0]], "runs are kept across resets; an unstarted starting picture is replaced, not duplicated (got %s)" % str(rl.tables["g"]["rows"]))
 	check(rl.clear_table("g") and (rl.tables["g"]["rows"] as Array).is_empty() and not rl.clear_table("nope"), "clear_table empties a table on purpose")
 	rs.queue_free()
-	_expected += 25
+	# Export edge cases
+	var el: SkLog = SkLog.new()
+	el.app_name = "unit"
+	el.table("empty", PackedStringArray(["a", "b"]))
+	check(SkExport.table_csv(el, "empty") == "a,b\r\n", "a table with no rows exports its header")
+	check(SkExport.table_csv(el, "nope") == "" and SkExport.save_table_csv(el, "nope") == "ERROR" and not FileAccess.file_exists("user://exports/unit-nope.csv"), "an unknown table is refused with ERROR and no file is written")
+	el.add_row("empty", [NAN, INF])
+	el.add_row("empty", [-INF, 2.5])
+	check(SkExport.table_csv(el, "empty") == "a,b\r\n,\r\n,2.5\r\n", "NaN and infinite numbers become empty CSV cells")
+	var nj: Dictionary = JSON.parse_string(SkExport.to_json(el))
+	check(int(nj["non_finite"]) == 3 and nj["tables"]["empty"]["rows"][0] == [null, null] and float(nj["tables"]["empty"]["rows"][1][1]) == 2.5, "JSON writes NaN and infinity as null and counts them in non_finite")
+	check(SkExport.to_csv(PackedStringArray(["x"]), [["\t=1+1"], ["\r=2"]]) == "x\r\n'\t=1+1\r\n\"'\r=2\"\r\n", "text cells starting with TAB or CR are neutralised like = + - @")
+	_expected += 30
 
 
 func _test_lesson() -> void:

@@ -5,7 +5,7 @@ It removes the parts every simulation re-implements: parameters and limits, star
 clock, a theme, accessibility settings, keyboard handling for web iframes, graphs, optional lessons and data
 export, and the web export. It does **not** include any scientific model, and it never asks you to inherit from anything.
 
-Status: version 0.3.0. 294 automated checks pass on Godot 4.7.2 (0.2.0 also passed on 4.5; 0.3.0 was not rerun there). The demos' web export was checked in
+Status: version 0.4.0. 301 automated checks pass on Godot 4.7.2 (0.2.0 also passed on 4.5; later versions were not rerun there). The demos' web export was checked in
 real Chromium for 0.1.0; for 0.2.0 and 0.3.0, two simulations built on the kit passed a 45-check run in Chrome. See "Verified / not verified" below, and "Changes" at the end.
 
 ## Quick start
@@ -62,7 +62,7 @@ random, turn-driven, no lesson or gauge) and *Cooling coffee* (38 lines of code)
 ## Tests
 
 ```bash
-GODOT=godot bash tests/run_all.sh                       # 7 suites, 294 checks
+GODOT=godot bash tests/run_all.sh                       # 7 suites, 301 checks
 bash addons/simkit/deploy/export_web.sh . exports/web   # export + contract checks (needs 4.7 export templates)
 ```
 
@@ -82,6 +82,14 @@ colour-blind viewing, the real sims site, a lean web template, a 4.5 web export,
 Licence: not set (yours to choose). Third-party code: none. Engine: Godot (MIT).
 
 ## Changes
+
+**0.4.0** (2026-11-17): four minor findings of the independent audit.
+- **Transport button wording**: `SkTransportBar.texts` (`start`, `pause`, `resume`, `again`, `reset`) sets the
+  labels, and they survive resets and state changes. Before, only the Step text could be changed.
+- **Exports never fail silently**: saving a table that does not exist returns `"ERROR"` with a warning instead of
+  writing an empty file; a table with no rows exports its header.
+- **NaN and infinity**: empty CSV cells, `null` in JSON, and a `non_finite` count in the JSON export.
+- **Spreadsheet safety**: text cells starting with TAB or CR are neutralised like those starting with = + - @.
 
 **0.3.0** (2026-11-17): fixes for the six moderate findings of the independent audit.
 - **No more leaks**: `SkLog`, `SkA11y` and the transport bar connect methods, not lambdas, so a reloaded scene
