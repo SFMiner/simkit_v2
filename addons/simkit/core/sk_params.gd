@@ -33,10 +33,24 @@ var _values: Dictionary = {}
 
 # === PUBLIC METHODS ===
 ## Registers a spec. Returns it. A duplicate id replaces nothing and is refused (returns null).
+## A spec that cannot hold a value correctly (min not below max, no choices, a default of the wrong type) is
+## refused with an error (returns null). Lesser problems from validate() are reported as warnings.
 func add(spec: SkParam) -> SkParam:
 	if spec == null or _specs.has(spec.id):
 		push_warning("SkParams.add: missing spec or duplicate id '%s'" % (spec.id if spec != null else ""))
 		return null
+	var problems: PackedStringArray = spec.validate()
+	if not problems.is_empty():
+		var fatal: bool = spec.coerce(spec.default_value) == null
+		match spec.kind:
+			SkParam.Kind.FLOAT, SkParam.Kind.INT:
+				fatal = fatal or not (is_finite(spec.min_value) and is_finite(spec.max_value)) or spec.min_value >= spec.max_value
+			SkParam.Kind.CHOICE:
+				fatal = fatal or spec.choices.is_empty()
+		if fatal:
+			push_error("SkParams.add: refusing '%s': %s" % [spec.id, "; ".join(problems)])
+			return null
+		push_warning("SkParams.add: '%s': %s" % [spec.id, "; ".join(problems)])
 	_specs[spec.id] = spec
 	_order.append(spec.id)
 	var start: Variant = spec.coerce(spec.default_value)

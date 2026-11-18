@@ -25,6 +25,9 @@ var _wide_box: HBoxContainer = HBoxContainer.new()
 var _side_scroll: ScrollContainer = null
 var _narrow_scroll: ScrollContainer = ScrollContainer.new()
 var _narrow_box: VBoxContainer = VBoxContainer.new()
+## Keep content clear of the vertical scrollbars, which would otherwise cover right-aligned read-outs.
+var _side_margin: MarginContainer = MarginContainer.new()
+var _narrow_margin: MarginContainer = MarginContainer.new()
 var _narrow: bool = false
 var _built: bool = false
 var _warned: Dictionary = {}
@@ -45,15 +48,21 @@ func _init() -> void:
 	add_child(_narrow_scroll)
 	_narrow_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_narrow_box.add_theme_constant_override("separation", 12)
-	_narrow_scroll.add_child(_narrow_box)
+	_narrow_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_narrow_margin.add_child(_narrow_box)
+	_narrow_scroll.add_child(_narrow_margin)
 	_side_scroll = ScrollContainer.new()
 	_side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_side_scroll.follow_focus = true
+	_side_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_side_scroll.add_child(_side_margin)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
 		_relayout()
+	elif what == NOTIFICATION_THEME_CHANGED:
+		_fit_scrollbar_margins()
 
 
 # === PUBLIC METHODS ===
@@ -78,8 +87,10 @@ func too_wide_panes() -> Array[Array]:
 	var out: Array[Array] = []
 	if not _built:
 		return out
-	var avail_side: float = size.x if _narrow else side_width
-	var avail_main: float = size.x if _narrow else size.x - side_width - 12.0
+	var margin: MarginContainer = _narrow_margin if _narrow else _side_margin
+	var gap: float = float(margin.get_theme_constant("margin_right"))
+	var avail_side: float = (size.x if _narrow else side_width) - gap
+	var avail_main: float = size.x - gap if _narrow else size.x - side_width - 12.0
 	if side.get_combined_minimum_size().x > avail_side + 0.5:
 		out.append(["side", side.get_combined_minimum_size().x, avail_side])
 	if main.get_combined_minimum_size().x > avail_main + 0.5:
@@ -92,6 +103,12 @@ func is_narrow() -> bool:
 
 
 # === PRIVATE METHODS ===
+func _fit_scrollbar_margins() -> void:
+	for pair: Array in [[_side_scroll, _side_margin], [_narrow_scroll, _narrow_margin]]:
+		var bar_w: float = (pair[0] as ScrollContainer).get_v_scroll_bar().get_combined_minimum_size().x
+		(pair[1] as MarginContainer).add_theme_constant_override("margin_right", int(ceilf(maxf(bar_w, 8.0))) + 2)
+
+
 func _relayout() -> void:
 	if _built and (size.x < narrow_below) != _narrow:
 		_place(size.x < narrow_below)
@@ -118,9 +135,7 @@ func _place(narrow: bool) -> void:
 			pane.get_parent().remove_child(pane)
 	if _side_scroll.get_parent() != null:
 		_side_scroll.get_parent().remove_child(_side_scroll)
-	if _side_scroll.get_child_count() > 0:
-		for c: Node in _side_scroll.get_children():
-			_side_scroll.remove_child(c)
+	_fit_scrollbar_margins()
 	_wide_box.visible = not narrow
 	_narrow_scroll.visible = narrow
 	if narrow:
@@ -131,5 +146,5 @@ func _place(narrow: bool) -> void:
 		main.custom_minimum_size.y = 0.0
 		_wide_box.add_child(main)
 		_side_scroll.custom_minimum_size.x = side_width
-		_side_scroll.add_child(side)
+		_side_margin.add_child(side)
 		_wide_box.add_child(_side_scroll)

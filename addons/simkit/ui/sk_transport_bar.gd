@@ -15,10 +15,23 @@ extends HFlowContainer
 ## Space hotkey stands aside instead of toggling a second time.
 ##
 ## Button wording: set `texts` (and `step_text`) before bind(), or call refresh() after changing them:
-##   bar.texts.start = "Run"            # keys: start, pause, resume, again, reset
+##   bar.texts.start = "Run"            # keys: start, pause, resume, again, reset, speed, speed_slow
+##
+## Several simulations on one screen: each bar's hotkeys act only for its own simulation, the one that holds
+## keyboard focus or was clicked last (`hotkey_scope`, by default the nearest SkSplitView above the bar, else
+## its parent). With one bar on screen its hotkeys always work.
+##
+## When the device cannot keep up, the speed button says so: "Speed 8x (running at 5x)".
 
 # === CONSTANTS ===
-const _DEFAULT_TEXTS: Dictionary = {"start": "Start", "pause": "Pause", "resume": "Resume", "again": "Run again", "reset": "Reset"}
+const _DEFAULT_TEXTS: Dictionary = {"start": "Start", "pause": "Pause", "resume": "Resume", "again": "Run again",
+		"reset": "Reset", "speed": "Speed %sx", "speed_slow": "Speed %sx (running at %sx)"}
+## The speed button reports the speed actually reached when it is this far below the chosen one.
+const SLOW_RATIO: float = 0.9
+
+# === STATIC VARIABLES ===
+static var _bars: Array[SkTransportBar] = []
+static var _clicked: WeakRef = null
 
 # === PUBLIC VARIABLES ===
 var session: SkSession = null
@@ -31,6 +44,8 @@ var step_text: String = "Step"
 var texts: Dictionary = _DEFAULT_TEXTS.duplicate()
 var speeds: Array[float] = [1.0, 2.0, 4.0]
 var hotkeys: bool = true
+## The part of the screen that belongs to this bar's simulation (see the header). null = automatic.
+var hotkey_scope: Control = null
 ## What Reset does. Default: session.reset(). Override to also clear your graphs, log, etc.
 var on_reset_pressed: Callable = Callable()
 var play_button: Button = null
@@ -40,6 +55,7 @@ var speed_button: Button = null
 
 # === PRIVATE VARIABLES ===
 var _speed_index: int = 0
+var _measured_speed: float = -1.0
 
 
 # === PUBLIC METHODS ===
@@ -63,6 +79,16 @@ func bind(p_session: SkSession) -> void:
 		reset_button = SkUi.button(_text("reset"))
 		reset_button.pressed.connect(_on_reset)
 		add_child(reset_button)
+	# A choice the session cannot run at would be displayed but never happen.
+	var clamped: Array[float] = []
+	for s: float in speeds:
+		var c: float = clampf(s, SkSession.SPEED_MIN, SkSession.SPEED_MAX)
+		if not is_equal_approx(c, s):
+			push_warning("SkTransportBar: speed %s is outside what SkSession allows (%s to %s); using %s" % [
+					String.num(s), String.num(SkSession.SPEED_MIN), String.num(SkSession.SPEED_MAX), String.num(c)])
+		if not clamped.has(c):
+			clamped.append(c)
+	speeds = clamped if not clamped.is_empty() else [1.0]
 	if show_speed and speeds.size() > 1:
 		speed_button = SkUi.button(_speed_text())
 		speed_button.pressed.connect(_on_speed)
@@ -79,6 +105,8 @@ func bind(p_session: SkSession) -> void:
 		session.state_changed.connect(_on_state_changed)
 	if not session.reset_done.is_connected(refresh):
 		session.reset_done.connect(refresh)
+	if not session.speed_measured.is_connected(_on_speed_measured):
+		session.speed_measured.connect(_on_speed_measured)
 	refresh()
 
 
@@ -105,19 +133,60 @@ func refresh() -> void:
 				play_button.text = _text("start")
 	if reset_button != null:
 		reset_button.text = _text("reset")
+	if speed_button != null:
+		if session.state != SkSession.State.RUNNING:
+			_measured_speed = -1.0
+		speed_button.text = _speed_text()
 	if step_button != null:
 		step_button.text = step_text
-	if step_button != null:
 		step_button.disabled = session.state == SkSession.State.FINISHED \
 				or (session.state == SkSession.State.RUNNING and session.mode != SkSession.Mode.MANUAL)
 
 
+## True if this bar's hotkeys should act now: it is the only bar on screen, or its simulation holds the
+## keyboard focus, or (nothing holding focus) its simulation was clicked last.
+func owns_hotkeys() -> bool:
+	var live: Array[SkTransportBar] = []
+	for b: SkTransportBar in _bars:
+		if is_instance_valid(b) and b.is_visible_in_tree() and b.hotkeys and b.session != null:
+			live.append(b)
+	if live.size() <= 1:
+		return true
+	var focus: Control = get_viewport().gui_get_focus_owner()
+	if focus != null:
+		for b: SkTransportBar in live:
+			if b._scope() == focus or b._scope().is_ancestor_of(focus):
+				return b == self
+	var clicked: SkTransportBar = _clicked.get_ref() as SkTransportBar if _clicked != null else null
+	return clicked == self
+
+
 # === LIFECYCLE METHODS ===
+func _enter_tree() -> void:
+	if not _bars.has(self):
+		_bars.append(self)
+
+
+func _exit_tree() -> void:
+	_bars.erase(self)
+
+
+## Remembers which simulation was clicked last. Never consumes the click.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+		var scope: Control = _scope()
+		var local: InputEventMouseButton = scope.make_input_local(event) as InputEventMouseButton
+		if scope.is_visible_in_tree() and Rect2(Vector2.ZERO, scope.size).has_point(local.position):
+			_clicked = weakref(self)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not hotkeys or session == null or not (event is InputEventKey):
 		return
 	var key: InputEventKey = event
 	if not key.pressed or key.echo:
+		return
+	if not owns_hotkeys():
 		return
 	match key.keycode:
 		KEY_SPACE:
@@ -140,6 +209,23 @@ func _unhandled_input(event: InputEvent) -> void:
 # === PRIVATE METHODS ===
 func _text(key: String) -> String:
 	return str(texts.get(key, _DEFAULT_TEXTS[key]))
+
+
+func _scope() -> Control:
+	if hotkey_scope != null and is_instance_valid(hotkey_scope):
+		return hotkey_scope
+	var n: Node = get_parent()
+	while n != null:
+		if n is SkSplitView:
+			return n
+		n = n.get_parent()
+	return get_parent() as Control if get_parent() is Control else self
+
+
+func _on_speed_measured(effective: float) -> void:
+	_measured_speed = effective
+	if speed_button != null:
+		speed_button.text = _speed_text()
 
 
 ## A method, not a lambda, so freeing the bar disconnects it from the session.
@@ -176,10 +262,18 @@ func _on_reset() -> void:
 func _on_speed() -> void:
 	_speed_index = (_speed_index + 1) % speeds.size()
 	session.speed = speeds[_speed_index]
+	_measured_speed = -1.0
 	speed_button.text = _speed_text()
-	SkHost.announce("Speed " + _speed_text())
+	SkHost.announce(_speed_text())
 
 
 func _speed_text() -> String:
 	var s: float = speeds[_speed_index]
-	return "Speed %sx" % (str(int(s)) if s == floorf(s) else String.num(s))
+	if _measured_speed >= 0.0 and session != null and session.state == SkSession.State.RUNNING \
+			and _measured_speed < s * SLOW_RATIO:
+		return _text("speed_slow") % [_num(s), _num(snappedf(_measured_speed, 0.1))]
+	return _text("speed") % _num(s)
+
+
+static func _num(v: float) -> String:
+	return str(int(v)) if v == floorf(v) else String.num(v)

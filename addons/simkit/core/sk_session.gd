@@ -28,6 +28,14 @@ signal reset_done
 ## replaced never left READY (SkLog uses this to drop rows of a starting picture that was never run).
 signal resetting(run_started: bool)
 signal finished(reason: String)
+## About once a second of real time while RUNNING: the speed actually reached (simulation seconds per real
+## second). Below `speed` when the device cannot keep up (the clock's per-frame cap drops time).
+signal speed_measured(effective: float)
+
+# === CONSTANTS ===
+const SPEED_MIN: float = 0.05
+const SPEED_MAX: float = 64.0
+const SPEED_WINDOW: float = 1.0
 
 # === ENUMS ===
 enum State { READY, RUNNING, PAUSED, FINISHED }
@@ -50,7 +58,9 @@ var pause_on_focus_out: bool = true
 ## Real seconds are multiplied by this before stepping (the "speed" button).
 var speed: float = 1.0:
 	set(v):
-		speed = clampf(v, 0.05, 64.0)
+		speed = clampf(v, SPEED_MIN, SPEED_MAX)
+		_window_real = 0.0
+		_window_sim = 0.0
 ## Simulation time at which the run finishes by itself. 0 = never.
 var duration: float = 0.0
 ## CONTINUOUS mode: largest dt passed to on_step, so a stalled frame cannot blow up a model.
@@ -66,6 +76,16 @@ var finish_reason: String = ""
 ## 1 for the first run, +1 each time reset() replaces a run that had started. Resets while still READY
 ## (a settings change, a new seed before Start) keep the number. Put it in your table rows.
 var run_number: int = 0
+## The speed actually reached over the last measured second while running (see speed_measured); -1 before
+## the first measurement of a run.
+var effective_speed: float = -1.0
+## Simulation seconds skipped since the last reset because frames came too slowly (the clock's cap, or
+## max_delta in CONTINUOUS mode). The run stays valid; it just covered less time than asked.
+var dropped_seconds: float = 0.0
+
+# === PRIVATE VARIABLES ===
+var _window_real: float = 0.0
+var _window_sim: float = 0.0
 
 
 # === LIFECYCLE METHODS ===
@@ -135,6 +155,8 @@ func reset(reseed: bool = false, new_seed: int = -1) -> void:
 	step_count = 0
 	finish_reason = ""
 	clock.reset()
+	dropped_seconds = 0.0
+	effective_speed = -1.0
 	if params != null:
 		params.locked = false
 	if on_reset.is_valid():
@@ -175,19 +197,25 @@ func advance(real_delta: float) -> int:
 		return 0
 	var scaled: float = real_delta * speed
 	var taken: int = 0
+	var before: float = sim_time + _pending()
 	match mode:
 		Mode.FIXED_STEP:
 			var due: int = clock.advance(scaled)
+			if clock.dropped:
+				dropped_seconds += maxf(0.0, scaled - float(due) * clock.step)
 			for i: int in range(due):
 				_do_step(clock.step)
 				taken += 1
 				if state != State.RUNNING:
 					break
 		Mode.CONTINUOUS:
+			if scaled > max_delta:
+				dropped_seconds += scaled - max_delta
 			_do_step(minf(scaled, max_delta))
 			taken = 1
 		Mode.MANUAL:
 			pass
+	_measure(real_delta, sim_time + _pending() - before)
 	if taken > 0:
 		advanced.emit(taken)
 	return taken
@@ -206,6 +234,7 @@ func describe() -> Dictionary:
 		"step_length": manual_dt if mode == Mode.MANUAL else clock.step,
 		"params": params.to_labeled_dict() if params != null else {},
 		"finish_reason": finish_reason,
+		"dropped_seconds": dropped_seconds,
 	}
 
 
@@ -219,6 +248,21 @@ func _do_step(dt: float) -> void:
 		finish("duration")
 
 
+## Simulation time already accumulated toward the next fixed step (so measurement does not jitter by a step).
+func _pending() -> float:
+	return clock.alpha() * clock.step if mode == Mode.FIXED_STEP else 0.0
+
+
+func _measure(real_delta: float, sim_progress: float) -> void:
+	_window_real += real_delta
+	_window_sim += sim_progress
+	if _window_real >= SPEED_WINDOW:
+		effective_speed = _window_sim / _window_real
+		_window_real = 0.0
+		_window_sim = 0.0
+		speed_measured.emit(effective_speed)
+
+
 func _on_watched_param_changed(_id: String, _value: Variant) -> void:
 	if state == State.READY:
 		reset()
@@ -228,6 +272,8 @@ func _set_state(s: State) -> void:
 	if s == state:
 		return
 	state = s
+	_window_real = 0.0
+	_window_sim = 0.0
 	if params != null:
 		params.locked = lock_params_after_start and (s == State.RUNNING or s == State.PAUSED)
 	state_changed.emit(int(s))

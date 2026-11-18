@@ -192,7 +192,73 @@ func _test_transport() -> void:
 	check(wbar.play_button.text == "Resume", "a missing texts key falls back to the default wording")
 	wbar.free()
 	ws.queue_free()
-	_expected += 20
+	# Two simulations on screen: hotkeys belong to the one with focus, or the one clicked last
+	var sims: Array[Control] = []
+	var sessions: Array[SkSession] = []
+	for k: int in range(2):
+		var area: VBoxContainer = VBoxContainer.new()
+		area.position = Vector2(k * 500, 0)
+		area.size = Vector2(480, 300)
+		root.add_child(area)
+		var ss: SkSession = SkSession.new()
+		ss.auto_process = false
+		area.add_child(ss)
+		var bb: SkTransportBar = SkTransportBar.new()
+		bb.hotkey_scope = area
+		bb.bind(ss)
+		area.add_child(bb)
+		var other: HSlider = HSlider.new()
+		other.custom_minimum_size.x = 200.0
+		area.add_child(other)
+		sims.append(area)
+		sessions.append(ss)
+	await frames(1)
+	root.gui_release_focus()
+	_key(KEY_SPACE)
+	await frames(1)
+	check(sessions[0].state == SkSession.State.READY and sessions[1].state == SkSession.State.READY, "two bars, nothing focused or clicked: Space starts neither")
+	(sims[1].get_child(2) as HSlider).grab_focus()
+	_key(KEY_SPACE)
+	await frames(1)
+	check(sessions[0].state == SkSession.State.READY and sessions[1].state == SkSession.State.RUNNING, "two bars: Space starts the simulation that holds the focus")
+	root.gui_release_focus()
+	var click: InputEventMouseButton = InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = root.get_final_transform() * (sims[0].get_global_transform_with_canvas() * Vector2(100, 280))   # window pixels
+	click.global_position = click.position
+	root.push_input(click)
+	var up: InputEventMouseButton = click.duplicate()
+	up.pressed = false
+	root.push_input(up)
+	await frames(1)
+	_key(KEY_SPACE)
+	await frames(1)
+	check(sessions[0].state == SkSession.State.RUNNING and sessions[1].state == SkSession.State.RUNNING, "two bars: with no focus, Space goes to the simulation clicked last")
+	for area: Control in sims:
+		area.free()
+	# Speed choices the session cannot run, and the speed actually reached
+	var sp: SkSession = SkSession.new()
+	sp.auto_process = false
+	root.add_child(sp)
+	var spbar: SkTransportBar = SkTransportBar.new()
+	spbar.speeds = [1.0, 8.0, 100.0]
+	spbar.bind(sp)
+	root.add_child(spbar)
+	check(spbar.speeds == ([1.0, 8.0, 64.0] as Array[float]), "a speed choice above the session's maximum is clamped to it (%s)" % str(spbar.speeds))
+	spbar.speed_button.pressed.emit()
+	sp.start()
+	var measured: Array[float] = []
+	sp.speed_measured.connect(func(v: float) -> void: measured.append(v))
+	for i: int in range(12):
+		sp.advance(0.1)      # 8x of 0.1 s = 40 steps of 0.02, but the clock caps a frame at 12
+	check(measured.size() == 1 and absf(measured[0] - 2.4) < 0.05 and sp.dropped_seconds > 3.0, "the session measures the speed actually reached (%s) and counts dropped time (%.2f s)" % [str(measured), sp.dropped_seconds])
+	check(spbar.speed_button.text == "Speed 8x (running at 2.4x)", "the speed button says when the device cannot keep up (%s)" % spbar.speed_button.text)
+	sp.pause()
+	check(spbar.speed_button.text == "Speed 8x", "after a pause the speed button shows the chosen speed again")
+	spbar.free()
+	sp.queue_free()
+	_expected += 27
 
 
 func _test_viz() -> void:
@@ -217,6 +283,35 @@ func _test_viz() -> void:
 	check(g.series_ids() == (["a"] as Array[String]), "remove_series")
 	g.clear()
 	check(g.series_ids().is_empty() and g.describe() == "Pop.", "clear")
+	# Long runs: past MAX_POINTS the series is halved, not frozen
+	for i: int in range(SkLineGraph.MAX_POINTS + 5):
+		g.append_point("long", "Long", float(i), float(i % 7))
+	var lp: PackedVector2Array = g.series_points("long")
+	check(lp.size() <= SkLineGraph.MAX_POINTS and lp[0] == Vector2(0, 0) and lp[lp.size() - 1].x == float(SkLineGraph.MAX_POINTS + 4), "past MAX_POINTS a series keeps its first and newest points and goes on drawing (%d points)" % lp.size())
+	await frames(1)
+	var thin: PackedVector2Array = SkLineGraph._thin(PackedVector2Array(Array(range(20000)).map(func(i: int) -> Vector2: return Vector2(float(i) * 0.02, float(i % 13)))), 400.0)
+	check(thin.size() <= 400 * 4 + 4 and thin[0] == Vector2(0, 0), "a 20,000-point line is drawn with at most four points per pixel column (%d)" % thin.size())
+	var full: PackedVector2Array = PackedVector2Array(Array(range(5000)).map(func(i: int) -> Vector2: return Vector2(float(i) * 0.07, float((i * 37) % 101))))
+	var cache: Dictionary = {}
+	var grown: PackedVector2Array = PackedVector2Array()
+	for n: int in [1500, 3200, 5000]:
+		grown = g._line(cache, full.slice(0, n), 300.0)
+	check(grown == SkLineGraph._thin(full, 300.0), "thinning a growing line step by step gives exactly the full thinning")
+	g.clear()
+	# X ticks thin out to fit; end labels stay inside the plot and apart
+	g.auto_x = false
+	g.x_range = Vector2(0.0, 10000.0)
+	var font: Font = g.get_theme_default_font()
+	var fs: int = maxi(g.get_theme_default_font_size() - 3, 11)
+	var narrow_ticks: PackedFloat64Array = g.x_tick_values(110.0)
+	var label_w: float = font.get_string_size("10000", HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x
+	var gap_px: float = 110.0 * (narrow_ticks[1] - narrow_ticks[0]) / 10000.0 if narrow_ticks.size() >= 2 else 999.0
+	check(gap_px >= label_w * 1.5 and g.x_tick_values(600.0).size() > narrow_ticks.size(), "x tick labels thin out in a narrow plot (%d ticks at 110 px, %d at 600 px)" % [narrow_ticks.size(), g.x_tick_values(600.0).size()])
+	var plot_r: Rect2 = Rect2(50, 30, 300, 150)
+	var ends: Array[Dictionary] = [{"x": 300.0, "y": 184.0, "label": "A", "color": Color.WHITE}, {"x": 300.0, "y": 183.0, "label": "B", "color": Color.WHITE}]
+	var placed: Array[Dictionary] = SkLineGraph.end_label_positions(ends, plot_r, font, fs)
+	check(absf(float(placed[1]["y"]) - float(placed[0]["y"])) >= font.get_height(fs) - 0.01 and float(placed[1]["y"]) <= plot_r.end.y, "end labels near y = 0 stay above the x axis labels and do not overlap")
+	g.x_range = Vector2(0.0, 1.0)
 	var gauge: SkGauge = SkGauge.new()
 	gauge.heading = "Level"
 	gauge.min_value = 0.0
@@ -231,7 +326,7 @@ func _test_viz() -> void:
 	gauge.value = 150.0
 	check(gauge.verdict() == "above the healthy range" and gauge.describe() == "Level: 150, above the healthy range.", "gauge verdict: above, and describe()")
 	await frames(2)
-	_expected += 11
+	_expected += 16
 
 
 func _test_data() -> void:
@@ -328,6 +423,7 @@ func _test_data() -> void:
 	el.app_name = "unit"
 	el.table("empty", PackedStringArray(["a", "b"]))
 	check(SkExport.table_csv(el, "empty") == "a,b\r\n", "a table with no rows exports its header")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://exports/unit-nope.csv"))
 	check(SkExport.table_csv(el, "nope") == "" and SkExport.save_table_csv(el, "nope") == "ERROR" and not FileAccess.file_exists("user://exports/unit-nope.csv"), "an unknown table is refused with ERROR and no file is written")
 	el.add_row("empty", [NAN, INF])
 	el.add_row("empty", [-INF, 2.5])
@@ -407,27 +503,34 @@ func _test_split() -> void:
 	host.add_child(split)
 	split.set_panes(main_pane, side_pane)
 	await frames(2)
-	check(not split.is_narrow() and main_pane.get_parent() != null and side_pane.get_parent() is ScrollContainer, "split: 1000 px wide = side by side; side pane in its own scroll")
+	check(not split.is_narrow() and main_pane.get_parent() != null and side_pane.get_parent().get_parent() is ScrollContainer, "split: 1000 px wide = side by side; side pane in its own scroll")
 	host.size = Vector2(400.0, 700.0)
 	await frames(2)
 	check(split.is_narrow() and main_pane.get_parent() == side_pane.get_parent() and main_pane.get_parent() is VBoxContainer, "split: 400 px wide = stacked in one column")
 	check(main_pane.custom_minimum_size.y == split.main_min_height, "split: stacked main pane gets its minimum height")
 	host.size = Vector2(1000.0, 500.0)
 	await frames(2)
-	check(not split.is_narrow() and main_pane.custom_minimum_size.y == 0.0 and side_pane.get_parent() is ScrollContainer, "split: back to wide restores the side-by-side layout")
+	check(not split.is_narrow() and main_pane.custom_minimum_size.y == 0.0 and side_pane.get_parent().get_parent() is ScrollContainer, "split: back to wide restores the side-by-side layout")
 	var count: int = 0
 	for n: Node in split.find_children("*", "Control", true, false):
 		if n == main_pane or n == side_pane:
 			count += 1
 	check(count == 2, "split: each pane exists exactly once after switching")
 	check(split.too_wide_panes().is_empty(), "split: no pane is wider than its room")
+	var tall: Control = Control.new()
+	tall.custom_minimum_size.y = 3000.0
+	side_pane.add_child(tall)
+	await frames(2)
+	var vbar: VScrollBar = (side_pane.get_parent().get_parent() as ScrollContainer).get_v_scroll_bar()
+	check(vbar.visible and side_pane.get_global_rect().end.x <= vbar.get_global_rect().position.x + 0.5, "split: the side pane's content stops left of its scrollbar (end %.0f, bar at %.0f)" % [side_pane.get_global_rect().end.x, vbar.get_global_rect().position.x])
+	tall.free()
 	var wide_row: Control = Control.new()
 	wide_row.custom_minimum_size.x = 600.0
 	side_pane.add_child(wide_row)
 	await frames(1)
 	var tw: Array[Array] = split.too_wide_panes()
-	check(tw.size() == 1 and tw[0][0] == "side" and is_equal_approx(float(tw[0][2]), split.side_width), "split: a side pane wider than side_width is reported (%s)" % str(tw))
-	_expected += 7
+	check(tw.size() == 1 and tw[0][0] == "side" and float(tw[0][2]) < split.side_width and float(tw[0][2]) > split.side_width - 30.0, "split: a side pane wider than its room (side_width less the scrollbar margin) is reported (%s)" % str(tw))
+	_expected += 8
 
 
 func _key(keycode: Key) -> void:

@@ -1,6 +1,6 @@
 # Integration guide
 
-Target: a new Godot **4.7** project (4.5 also passes SimKit's tests). Everything below was exercised by the
+Target: a new Godot **4.7** project. Everything below was exercised by the
 demos; the minimal example in step 5 is `demo/minimal/cooling_demo.gd`.
 
 ## 1. Add the toolkit
@@ -43,7 +43,27 @@ Notes: the session never starts itself; `Reset` calls `on_reset` and returns to 
 
 ## 3. Top-level wiring (once per game)
 
-This is `demo/demo_menu.gd` reduced to its SimKit lines:
+Use `SkShell` (0.5.0): make your main scene's script extend it.
+
+```gdscript
+extends SkShell
+var sim := MySim.new()
+
+func _ready() -> void:
+	title = "How does dye spread through water?"
+	base_size = Vector2(1180, 560)                  # the size you design for
+	super._ready()                                  # loads saved settings, builds background, top bar, scaler, Tab ring
+	sim.setup(a11y)                                 # your simulation can read the settings
+	set_content(sim)
+	print("mygame: boot ok")                        # handy for browser checks
+```
+
+Tab walks every focusable control in the content in tree order; set `focus_provider` to a Callable returning
+your own list to change that. `ring.close_topmost` still closes your overlays on Escape. Add your own controls
+(a help button) to `top_bar`. Several simulations in one window: give each transport bar's `hotkey_scope` its
+simulation's root, or put each simulation in its own `SkSplitView` (the default scope).
+
+Without `SkShell`, this is the wiring it does (from `demo/demo_menu.gd`):
 
 ```gdscript
 var a11y := SkA11y.new()
@@ -158,5 +178,8 @@ excluded file's name can still appear in the `.pck`.
 * `a == [..] as Array[String]` parses as `(a == [..]) as Array[String]`: put the cast in parentheses.
 * `JSON.parse_string` prints an engine error on bad input; use `JSON.new().parse()` for untrusted text.
 * Disconnect or guard lambdas connected to signals of objects that may be freed (`is_instance_valid`).
+* A test that clicks with `root.push_input` must give the position in window pixels:
+  `root.get_final_transform() * (control.get_global_transform_with_canvas() * point)`.
+* Saved settings in `user://` belong to one game (Godot keeps them per `config/name`, on the web too).
 * Never connect a lambda that captures a RefCounted object to a signal of something that object holds: the two
   keep each other alive forever. Connect a method instead (SimKit 0.1.0 leaked a whole data log this way).

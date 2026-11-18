@@ -6,6 +6,9 @@ extends RefCounted
 ##
 ## Defaults follow the browser (prefers-reduced-motion, prefers-contrast). Once the player changes a
 ## setting, their choice is kept (in user://, which in a browser is local to that browser) and wins.
+## The choice belongs to one game: Godot keeps user:// per project name (config/name), on the web too, so
+## two SimKit games on one site do not share it (checked in Chrome, SimKit 0.5.0). Games that share a
+## config/name would share it.
 ## Settings only change presentation. They must never change simulation results: your drawing code asks
 ## `a11y.reduced_motion()` and `a11y.anim_time()`; your model never does.
 ##

@@ -1,12 +1,12 @@
 # SimKit
 
-A small toolkit for building classroom science simulations in Godot **4.7** (also passes its tests on 4.5).
+A small toolkit for building classroom science simulations in Godot **4.7** (0.2.0 also passed its tests on 4.5).
 It removes the parts every simulation re-implements: parameters and limits, start/pause/reset, a reproducible
 clock, a theme, accessibility settings, keyboard handling for web iframes, graphs, optional lessons and data
-export, and the web export. It does **not** include any scientific model, and it never asks you to inherit from anything.
+export, and the web export. It does **not** include any scientific model, and nothing requires you to inherit from it (`SkShell` is optional).
 
-Status: version 0.4.0. 301 automated checks pass on Godot 4.7.2 (0.2.0 also passed on 4.5; later versions were not rerun there). The demos' web export was checked in
-real Chromium for 0.1.0; for 0.2.0 and 0.3.0, two simulations built on the kit passed a 45-check run in Chrome. See "Verified / not verified" below, and "Changes" at the end.
+Status: version 0.5.0. 316 automated checks pass on Godot 4.7.2 (0.2.0 also passed on 4.5; later versions were not rerun there). The demos' web export was checked in
+real Chromium for 0.1.0; for 0.2.0, 0.3.0 and 0.5.0, two simulations built on the kit passed a 45-check run in Chrome. See "Verified / not verified" below, and "Changes" at the end.
 
 ## Quick start
 
@@ -50,7 +50,7 @@ Run the demos: open this folder in Godot 4.7 and press F5 (launcher with three s
 | Folder | Components | Depends on |
 |---|---|---|
 | `core/` | `SkParam`/`SkParams` (parameters, validation, page-address settings), `SkSession` (lifecycle, reproducible seed, 3 time models), `SkClock`, `SkHost` (all browser access), `SkFocusRing` (Tab ring, leave game), `SkViewScaler`, `SkTheme` (dark/light/high contrast), `SkA11y` | nothing |
-| `ui/` | `SkParamPanel`, `SkTransportBar`, `SkSplitView`, `SkUi` | core |
+| `ui/` | `SkShell` (top-level wiring), `SkParamPanel`, `SkTransportBar`, `SkSplitView`, `SkUi` | core |
 | `viz/` | `SkLineGraph`, `SkGauge` | core |
 | `data/` | `SkLog`, `SkExport` (JSON/CSV, local only) | core |
 | `edu/` | `SkLesson`, `SkLessonPanel` (prediction, observation, explanation, vocabulary) | core + ui |
@@ -62,13 +62,13 @@ random, turn-driven, no lesson or gauge) and *Cooling coffee* (38 lines of code)
 ## Tests
 
 ```bash
-GODOT=godot bash tests/run_all.sh                       # 7 suites, 301 checks
+GODOT=godot bash tests/run_all.sh                       # 7 suites, 316 checks
 bash addons/simkit/deploy/export_web.sh . exports/web   # export + contract checks (needs 4.7 export templates)
 ```
 
 ## Verified / not verified
 
-Verified: all headless suites on 4.7.stable and 4.5.stable; each module combination in a clean project; the
+Verified: all headless suites on 4.7.2 (on 4.7.stable and 4.5.stable up to 0.2.0); each module combination in a clean project; the
 models against closed-form solutions; a web export (4.7, no threads, 39 MB) in Chromium through an iframe harness
 (boot, no console errors, no auto-play, keyboard exit, class settings, pause freezes the frame, 4 frame sizes).
 
@@ -82,6 +82,25 @@ colour-blind viewing, the real sims site, a lean web template, a 4.5 web export,
 Licence: not set (yours to choose). Third-party code: none. Engine: Godot (MIT).
 
 ## Changes
+
+**0.5.0** (2026-11-17): the rest of the independent audit's list.
+- **`SkShell`**: the top-level wiring (background, title bar with the host's reserved corner, accessibility
+  settings, view scaler, Tab ring) as one node. The Tab order defaults to the content's focusable controls in
+  tree order; `focus_provider` overrides it. The two audit simulations' `main.gd` files shrank to 9 lines of code.
+- **Two simulations on one screen**: each transport bar's hotkeys act only for the simulation that holds focus or
+  was clicked last (`hotkey_scope`). With one bar, nothing changes.
+- **Speed**: `SkSession.effective_speed`, `speed_measured` and `dropped_seconds` report when a slow device cannot
+  keep up, and the speed button then says "Speed 8x (running at 5x)". Speed choices beyond the session's range are
+  clamped with a warning. The speed announcement no longer says "Speed Speed 2x".
+- **Graphs**: past `MAX_POINTS` a series is halved instead of frozen; redraws convert only new points and draw at
+  most a few points per pixel column; x tick labels thin out to fit; end labels stay inside the plot and apart;
+  the top tick label clears the title.
+- **Side pane**: content keeps clear of the scrollbar, so right-aligned read-outs are no longer covered.
+- **Parameter specs**: `SkParams.add()` refuses a spec that cannot hold a value (min not below max, no choices,
+  a default of the wrong type) and warns about lesser problems.
+- **Stretch settings**: `SkViewScaler` warns when the project's stretch mode or aspect would stop it working.
+- **Shared state**: `SkHost.reset_for_tests()`. Saved display settings are per game: Godot keeps `user://` per
+  project name on the web too (checked in Chrome).
 
 **0.4.0** (2026-11-17): four minor findings of the independent audit.
 - **Transport button wording**: `SkTransportBar.texts` (`start`, `pause`, `resume`, `again`, `reset`) sets the

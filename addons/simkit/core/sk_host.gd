@@ -12,13 +12,15 @@ extends RefCounted
 ##   - screen-reader text goes to live regions in the HTML shell      -> announce()
 
 # === CONSTANTS ===
-const VERSION: String = "0.4.0"
+const VERSION: String = "0.5.0"
 const LEAVE_MESSAGE_TYPE: String = "sims:leave-game"
 ## Corner (CSS px) kept free of controls so the host page's Full screen button is never covered.
 const RESERVED_CSS: Vector2 = Vector2(200.0, 64.0)
 const ANNOUNCE_HISTORY: int = 30
 
 # === STATIC VARIABLES ===
+# These are shared by everything in one running game (a page has one set of live regions and one host),
+# so two simulations on one screen write to the same lists. reset_for_tests() clears them between tests.
 ## Outside a web export there is no page address; set this (tests, desktop development) to simulate one.
 static var query_override: String = ""
 ## The last things announce() was asked to say, newest last: {"text", "assertive"}. Tests read this.
@@ -27,6 +29,14 @@ static var leave_count: int = 0
 
 
 # === PUBLIC METHODS ===
+## Clears the shared test-facing state (announcements, leave_count, query_override), so one test cannot
+## see what an earlier one left behind.
+static func reset_for_tests() -> void:
+	announcements.clear()
+	leave_count = 0
+	query_override = ""
+
+
 static func is_web() -> bool:
 	return OS.has_feature("web")
 

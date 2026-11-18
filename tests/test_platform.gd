@@ -131,6 +131,15 @@ func run() -> void:
 	check(low.is_empty(), "every graph line colour has >= 3:1 contrast on the graph background in every palette (WCAG 1.4.11): %s" % str(low))
 	check(SkTheme.build("light").get_color("series_0", "SkChart") == SkTheme.SERIES_LIGHT[0] and SkTheme.build("dark").get_color("series_0", "SkChart") == SkTheme.SERIES[0], "the theme carries the palette's series colours for graphs")
 
+	SkHost.announce("left over")
+	SkHost.leave_game()
+	SkHost.query_override = "?x=1"
+	SkHost.reset_for_tests()
+	check(SkHost.announcements.is_empty() and SkHost.leave_count == 0 and SkHost.query_override == "", "SkHost.reset_for_tests clears the shared announcement list, leave count and query override")
+	var loose: Window = Window.new()
+	check(SkViewScaler.stretch_problem(get_root()) == "" and SkViewScaler.stretch_problem(loose).contains("canvas_items") and SkViewScaler.stretch_problem(loose).contains("expand"), "SkViewScaler names the stretch settings it needs when they are missing")
+	loose.free()
+
 	# --- SkA11y
 	var a: SkA11y = SkA11y.new()
 	a.persist = false
@@ -172,7 +181,7 @@ func run() -> void:
 	c.load_saved()
 	check(approx(c.text_scale(), 1.2) and c.reduced_motion() and not c.high_contrast(), "player's choices persist and reload; untouched settings stay default")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://simkit_test_a11y.cfg"))
-	finish(48)
+	finish(50)
 
 
 ## WCAG relative-luminance contrast ratio.

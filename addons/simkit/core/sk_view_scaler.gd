@@ -36,11 +36,29 @@ var _applying: bool = false
 
 # === LIFECYCLE METHODS ===
 func _ready() -> void:
+	var problem: String = stretch_problem(get_window())
+	if problem != "":
+		push_warning("SkViewScaler: " + problem)
 	get_tree().root.size_changed.connect(apply)
 	apply()
 
 
 # === PUBLIC METHODS ===
+## "" when the window's stretch settings let this scaler work; otherwise what to change. Without them the
+## scaler sets content_scale_size and nothing visible happens.
+static func stretch_problem(win: Window) -> String:
+	if win == null:
+		return ""
+	var bad: PackedStringArray = PackedStringArray()
+	if win.content_scale_mode != Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
+		bad.append("display/window/stretch/mode must be canvas_items")
+	if win.content_scale_aspect != Window.CONTENT_SCALE_ASPECT_EXPAND:
+		bad.append("display/window/stretch/aspect must be expand")
+	if bad.is_empty():
+		return ""
+	return "text and controls will not scale with the window: " + " and ".join(bad) + " (Project Settings)."
+
+
 ## Screen pixels per base pixel for a window of `window` physical px on a display with `dpr` physical
 ## px per CSS px. Pure function: tested without a window.
 static func scale_for(window: Vector2, dpr: float, base: Vector2, p_text_scale: float = 1.0,

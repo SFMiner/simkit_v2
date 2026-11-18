@@ -73,9 +73,9 @@ func run() -> void:
 
 	# Spec validation
 	var bad: SkParams = SkParams.new()
-	bad.add(SkParam.float_param("x", "X", 5.0, 0.0, 1.0))
-	bad.add(SkParam.float_param("y", "Y", 0.5, 2.0, 1.0))
-	check(bad.validate().size() >= 2, "validate catches default outside range and min >= max")
+	var kept: SkParam = bad.add(SkParam.float_param("x", "X", 5.0, 0.0, 1.0))
+	var refused: SkParam = bad.add(SkParam.float_param("y", "Y", 0.5, 2.0, 1.0))
+	check(kept != null and refused == null and not bad.has("y") and bad.validate().size() == 1, "add() refuses min >= max (a value could never be stored right) and keeps, with a warning, a default outside the range")
 	var off_grid: SkParams = SkParams.new()
 	off_grid.add(SkParam.int_param("g", "G", 3, 0, 20, 5))
 	check(off_grid.validate().size() == 1, "validate catches a default that is off the step grid")
