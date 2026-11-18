@@ -100,15 +100,26 @@ session.lock_params_after_start = true       # locked_while_running params refus
 
 * **Graph / gauge**: `graph.append_point(id, label, x, y)`; `graph.set_series(id, label, points, true)` for a dashed kept run;
   `graph.bands = [{"lo":..,"hi":..,"label":..}]`; call `describe()` for a text summary to announce.
-* **Layout**: wrap a main pane and a side pane with `SkSplitView.set_panes(main, side)`.
+* **Layout**: wrap a main pane and a side pane with `SkSplitView.set_panes(main, side)`. It never scrolls sideways,
+  so make long text wrap: `SkUi.label(text, 0, true)`, and `SkUi.button(text, toggle, true)` in a `VBoxContainer`
+  (never in an `HFlowContainer`, where a wrapping button collapses). Rows of fixed-width controls, such as two graphs
+  side by side, need to stack when narrow. In debug builds `SkSplitView` warns once when a pane is wider than its
+  room, and `too_wide_panes()` lists them for a test.
 * **Log and export**: `var log := SkLog.new(); log.attach(session)` records state changes and parameter changes
   automatically; `log.table("name", columns)` then `log.add_row(...)` for measurements. Tables keep every run:
   calling `table()` again with the same columns (from `on_reset`, say) keeps the rows, and different columns are
   refused with a warning. Put `session.run_number` in a `run` column to tell runs apart. Rows written for a
   starting picture that was replaced before it ran are dropped automatically; `clear_table()` empties a table;
   `SkExport.save_json(log)` / `save_table_csv(log, "name")` from a *button the student presses*.
+  Consecutive changes of one parameter (a slider drag) are one `param` event with a `changes` count. Past
+  `MAX_EVENTS` the log keeps only the run's lifecycle and the student's answers, after one `log_full` event; the
+  JSON export reports `dropped_events` and `dropped_rows`. `log.detach()` stops recording.
 * **Lesson**: `SkLessonPanel.new().show_lesson(SkLesson.from_dict({...}))` or `SkLesson.from_json(text)`;
-  set `panel.log = log` to record answers. Leave fields out to omit sections. Answers are multiple choice only.
+  set `panel.log = log` to record answers. Leave fields out to omit sections. Answers are multiple choice only,
+  shown one per line so long answers wrap. Once the explanation is shown the prediction is final
+  (`lock_prediction_on_explanation`, default true; set it false to let students revise).
+* **Graph colours** follow the palette: the light palette uses darker line colours (all at least 3:1 on the graph
+  background). In your own drawing, use `SkTheme.series_color(i, a11y.palette_name())`.
 * **Announce** anything meaningful: `SkHost.announce("Month 12: foxes died out", true)` (assertive for failures).
 
 ## 7. Tests
@@ -123,8 +134,9 @@ and test it directly (`tests/test_models.gd` compares against closed-form soluti
 1. Install the export templates for your exact engine version (Editor → Manage Export Templates).
 2. Copy `export_presets.cfg` from this repo (preset `Web`: single-threaded, custom shell
    `res://addons/simkit/deploy/shell.html`, tests/docs/markdown/deploy files excluded). Change `export_path`.
-3. `GODOT=godot bash addons/simkit/deploy/export_web.sh . exports/web`. It exports, then checks: `index.html` at the root,
-   `.pck` and `.wasm` present, threads off, no tests/docs/home paths in the `.pck`, live regions present.
+3. `GODOT=godot bash addons/simkit/deploy/export_web.sh . exports/web` (in Git Bash on Windows; needs Python 3). It
+   exports, then checks: `index.html` at the root, `.pck` and `.wasm` present (it stops there if they are not),
+   threads off, no tests/docs/home paths in the `.pck`, live regions present. It exits non-zero on any FAIL.
 4. Browser check: serve a folder containing `harness.html` and your export as `game/`, then
    `PORT=… node addons/simkit/deploy/web_smoke.js <shots-dir>` (needs Node and Playwright). Edit the
    `boot ok` log line and the menu clicks to match your game; **read the screenshots**.
@@ -144,3 +156,5 @@ excluded file's name can still appear in the `.pck`.
 * `a == [..] as Array[String]` parses as `(a == [..]) as Array[String]`: put the cast in parentheses.
 * `JSON.parse_string` prints an engine error on bad input; use `JSON.new().parse()` for untrusted text.
 * Disconnect or guard lambdas connected to signals of objects that may be freed (`is_instance_valid`).
+* Never connect a lambda that captures a RefCounted object to a signal of something that object holds: the two
+  keep each other alive forever. Connect a method instead (SimKit 0.1.0 leaked a whole data log this way).

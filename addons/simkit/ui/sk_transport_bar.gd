@@ -67,8 +67,10 @@ func bind(p_session: SkSession) -> void:
 	session.speed = speeds[_speed_index]
 	if speed_button != null:
 		speed_button.text = _speed_text()
-	session.state_changed.connect(func(_s: int) -> void: refresh())
-	session.reset_done.connect(refresh)
+	if not session.state_changed.is_connected(_on_state_changed):
+		session.state_changed.connect(_on_state_changed)
+	if not session.reset_done.is_connected(refresh):
+		session.reset_done.connect(refresh)
 	refresh()
 
 
@@ -124,6 +126,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # === PRIVATE METHODS ===
+## A method, not a lambda, so freeing the bar disconnects it from the session.
+func _on_state_changed(_s: int) -> void:
+	refresh()
+
+
 func _on_play() -> void:
 	match session.state:
 		SkSession.State.RUNNING:

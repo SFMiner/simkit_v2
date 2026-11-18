@@ -37,9 +37,15 @@ const HIGH_CONTRAST: Dictionary = {
 	"grid": Color(1, 1, 1, 0.3), "band": Color(0.5, 1.0, 0.5, 0.25),
 }
 ## Okabe-Ito colour-blind-safe series colours. Graphs also vary dash style and marker shape.
+## Used on the dark and high-contrast palettes: each has at least 3:1 contrast against their graph background.
 const SERIES: Array[Color] = [
 	Color("#56B4E9"), Color("#E69F00"), Color("#009E73"), Color("#F0E442"),
 	Color("#CC79A7"), Color("#D55E00"), Color("#0072B2"), Color("#999999"),
+]
+## Darker versions of the same hues for the light palette (at least 4.2:1 against white; WCAG 1.4.11 asks 3:1).
+const SERIES_LIGHT: Array[Color] = [
+	Color("#0072B2"), Color("#A66F00"), Color("#00785A"), Color("#7F6F00"),
+	Color("#A3507F"), Color("#B24A00"), Color("#003F66"), Color("#666666"),
 ]
 const FONT_SIZE: int = 16
 
@@ -54,8 +60,15 @@ static func palette(name: String) -> Dictionary:
 	return DARK
 
 
-static func series_color(index: int) -> Color:
-	return SERIES[posmod(index, SERIES.size())]
+## Series colour `index` for a palette ("dark", "light", "high_contrast"). Graphs read the same colours from
+## the theme ("series_0".."series_7" under "SkChart"), so they follow the palette by themselves.
+static func series_color(index: int, palette_name: String = "dark") -> Color:
+	var list: Array[Color] = series_colors(palette_name)
+	return list[posmod(index, list.size())]
+
+
+static func series_colors(palette_name: String) -> Array[Color]:
+	return SERIES_LIGHT if palette_name == "light" else SERIES
 
 
 static func build(palette_name: String = "dark", font_size: int = FONT_SIZE) -> Theme:
@@ -118,6 +131,9 @@ static func build(palette_name: String = "dark", font_size: int = FONT_SIZE) -> 
 		t.set_color(color_name, "SkChart", p[color_name])
 	t.set_color("bg", "SkChart", p.panel)
 	t.set_color("edge", "SkChart", p.panel_edge)
+	var series: Array[Color] = series_colors(palette_name)
+	for i: int in range(series.size()):
+		t.set_color("series_%d" % i, "SkChart", series[i])
 	return t
 
 

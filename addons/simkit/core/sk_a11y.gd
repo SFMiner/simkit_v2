@@ -35,6 +35,8 @@ var font_size: int = SkTheme.FONT_SIZE
 # === PRIVATE VARIABLES ===
 var _chosen: Dictionary = {}
 var _quiet: bool = false
+## [WeakRef root, WeakRef scaler or null] per bind() call.
+var _bound: Array[Array] = []
 
 
 # === LIFECYCLE METHODS ===
@@ -108,17 +110,31 @@ func save() -> void:
 
 
 ## Applies the settings to `root` (its theme) and `scaler` (its text size), now and after every change.
+## Targets are held weakly: freeing the scene frees them, and this object no longer touches them.
 func bind(root: Control, scaler: SkViewScaler = null) -> void:
-	var apply_all: Callable = func() -> void:
-		if is_instance_valid(root):
-			root.theme = build_theme()
-		if scaler != null and is_instance_valid(scaler):
-			scaler.text_scale = text_scale()
-	apply_all.call()
-	changed.connect(apply_all)
+	_bound.append([weakref(root), weakref(scaler) if scaler != null else null])
+	_apply_bound()
+	if not changed.is_connected(_apply_bound):
+		changed.connect(_apply_bound)
 
 
 # === PRIVATE METHODS ===
+## A bound method, not a lambda: a lambda capturing this object, connected to its own signal, is a
+## reference cycle that keeps it alive forever.
+func _apply_bound() -> void:
+	var live: Array[Array] = []
+	for pair: Array in _bound:
+		var root: Control = (pair[0] as WeakRef).get_ref() as Control
+		if root == null:
+			continue
+		live.append(pair)
+		root.theme = build_theme()
+		var scaler: SkViewScaler = (pair[1] as WeakRef).get_ref() as SkViewScaler if pair[1] != null else null
+		if scaler != null:
+			scaler.text_scale = text_scale()
+	_bound = live
+
+
 func _on_param_changed(id: String, _value: Variant) -> void:
 	if _quiet:
 		return

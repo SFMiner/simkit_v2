@@ -7,12 +7,18 @@ extends RefCounted
 const TOUCH_MIN: float = 52.0
 
 
-static func button(text: String, toggle: bool = false) -> Button:
+## A button. `wrap` lets long text flow onto several lines and makes the button fill its container's width.
+## Put wrapping buttons in a VBoxContainer: inside an HFlowContainer a wrapping button gets no minimum width
+## and collapses into a tall, empty bar.
+static func button(text: String, toggle: bool = false, wrap: bool = false) -> Button:
 	var b: Button = Button.new()
 	b.text = text
 	b.toggle_mode = toggle
 	b.focus_mode = Control.FOCUS_ALL
 	b.custom_minimum_size = Vector2(TOUCH_MIN, TOUCH_MIN)
+	if wrap:
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return b
 
 
