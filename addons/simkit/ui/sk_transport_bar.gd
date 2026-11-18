@@ -13,6 +13,12 @@ extends HFlowContainer
 ## Hotkeys fire only when no focused control has used the key. When a button has keyboard focus, Space
 ## belongs to that button: a focused button does not consume the key press (it acts on release), so the
 ## Space hotkey stands aside instead of toggling a second time.
+##
+## Button wording: set `texts` (and `step_text`) before bind(), or call refresh() after changing them:
+##   bar.texts.start = "Run"            # keys: start, pause, resume, again, reset
+
+# === CONSTANTS ===
+const _DEFAULT_TEXTS: Dictionary = {"start": "Start", "pause": "Pause", "resume": "Resume", "again": "Run again", "reset": "Reset"}
 
 # === PUBLIC VARIABLES ===
 var session: SkSession = null
@@ -21,6 +27,8 @@ var show_step: bool = true
 var show_reset: bool = true
 var show_speed: bool = true
 var step_text: String = "Step"
+## Button labels by state. Change any of them to match your lesson's wording or language.
+var texts: Dictionary = _DEFAULT_TEXTS.duplicate()
 var speeds: Array[float] = [1.0, 2.0, 4.0]
 var hotkeys: bool = true
 ## What Reset does. Default: session.reset(). Override to also clear your graphs, log, etc.
@@ -44,7 +52,7 @@ func bind(p_session: SkSession) -> void:
 	add_theme_constant_override("h_separation", 6)
 	add_theme_constant_override("v_separation", 6)
 	if show_play:
-		play_button = SkUi.button("Start")
+		play_button = SkUi.button(_text("start"))
 		play_button.pressed.connect(_on_play)
 		add_child(play_button)
 	if show_step:
@@ -52,7 +60,7 @@ func bind(p_session: SkSession) -> void:
 		step_button.pressed.connect(_on_step)
 		add_child(step_button)
 	if show_reset:
-		reset_button = SkUi.button("Reset")
+		reset_button = SkUi.button(_text("reset"))
 		reset_button.pressed.connect(_on_reset)
 		add_child(reset_button)
 	if show_speed and speeds.size() > 1:
@@ -88,13 +96,17 @@ func refresh() -> void:
 	if play_button != null:
 		match session.state:
 			SkSession.State.RUNNING:
-				play_button.text = "Pause"
+				play_button.text = _text("pause")
 			SkSession.State.PAUSED:
-				play_button.text = "Resume"
+				play_button.text = _text("resume")
 			SkSession.State.FINISHED:
-				play_button.text = "Run again"
+				play_button.text = _text("again")
 			_:
-				play_button.text = "Start"
+				play_button.text = _text("start")
+	if reset_button != null:
+		reset_button.text = _text("reset")
+	if step_button != null:
+		step_button.text = step_text
 	if step_button != null:
 		step_button.disabled = session.state == SkSession.State.FINISHED \
 				or (session.state == SkSession.State.RUNNING and session.mode != SkSession.Mode.MANUAL)
@@ -126,6 +138,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # === PRIVATE METHODS ===
+func _text(key: String) -> String:
+	return str(texts.get(key, _DEFAULT_TEXTS[key]))
+
+
 ## A method, not a lambda, so freeing the bar disconnects it from the session.
 func _on_state_changed(_s: int) -> void:
 	refresh()

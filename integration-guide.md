@@ -72,7 +72,7 @@ func _ready() -> void:
 |---|---|---|
 | Differential equations, feedback, physics-like | `FIXED_STEP` (default) | `session.clock.step`, `session.speed`, `duration`; use `session.rng` for any randomness |
 | Per-frame motion where exact step size does not matter | `CONTINUOUS` | dt is the real frame time, capped by `max_delta` |
-| Generations or turns that can also run on their own | `FIXED_STEP`, `clock.step = 1.0` | One step = one generation. `step_text = "Next generation"` for single steps; Start runs `speed` generations per second (`speeds = [1.0, 2.0, 4.0, 8.0]`). Check `MAX_GENERATIONS` with `duration`. |
+| Generations or turns that can also run on their own | `FIXED_STEP`, `clock.step = 1.0` | One step = one generation. `step_text = "Next generation"` for single steps (other labels: `bar.texts.start = "Run"`; keys `start`, `pause`, `resume`, `again`, `reset`); Start runs `speed` generations per second (`speeds = [1.0, 2.0, 4.0, 8.0]`). Check `MAX_GENERATIONS` with `duration`. |
 | Steps only when the student acts (never runs by itself) | `MANUAL` | `session.step_once()` with `manual_dt`. The transport bar hides Start for a MANUAL session, since it could never run. |
 | Your own loop | any, with `auto_process = false` | call `session.advance(delta)` yourself |
 
@@ -114,6 +114,8 @@ session.lock_params_after_start = true       # locked_while_running params refus
   Consecutive changes of one parameter (a slider drag) are one `param` event with a `changes` count. Past
   `MAX_EVENTS` the log keeps only the run's lifecycle and the student's answers, after one `log_full` event; the
   JSON export reports `dropped_events` and `dropped_rows`. `log.detach()` stops recording.
+  `save_table_csv` returns `"ERROR"` for a table that does not exist (nothing is written); NaN and infinite
+  numbers export as empty CSV cells and JSON `null`, counted in the JSON's `non_finite`.
 * **Lesson**: `SkLessonPanel.new().show_lesson(SkLesson.from_dict({...}))` or `SkLesson.from_json(text)`;
   set `panel.log = log` to record answers. Leave fields out to omit sections. Answers are multiple choice only,
   shown one per line so long answers wrap. Once the explanation is shown the prediction is final
